@@ -4,7 +4,7 @@ from prometheus_client import generate_latest
 
 from utils.logging import set_logging_configuration, is_ready_gauge, last_updated_gauge
 from utils.config import DEBUG, PORT, POD_NAME
-# from api_endpoints import api_endpoints  # Uncomment to import enpoints
+from job_endpoints import job_api_bp
 
 
 set_logging_configuration()
@@ -15,8 +15,7 @@ def create_app():
     health = HealthCheck()
     app.add_url_rule('/healthz', 'healthcheck', view_func=lambda: health.run())
     app.add_url_rule('/metrics', 'metrics', view_func=generate_latest)
-
-    # app.register_blueprint(api_endpoints)  # Uncomment to add enpoints from api_endpoints.py
+    app.register_blueprint(job_api_bp)
 
     @app.before_request
     def set_ready():
