@@ -53,28 +53,27 @@ def iterate_dead_list():
                     request1 = NexusRequest(input_response=page, link_href="patientData", method="GET")
                     current_page = execute_nexus_flow([request1])
                     for entry in current_page:
-                        if entry['id'] == 1:
-                            # Check state is correct
-                            if entry.get('patientState', {}).get('type', {}).get('id', '').upper() == 'DEAD':
-                                request2 = NexusRequest(input_response=entry, link_href="self", method="GET")
-                                patient = execute_nexus_flow([request2])
-                                request3 = NexusRequest(input_response=patient, link_href="audit", method="GET")
-                                patient_changes = execute_nexus_flow([request3])
-                                # Find the the latest change to current state and get the datetime
-                                time_set_dead_last = max([x for x in patient_changes['auditEntries'] if x['type'] == 'CHANGE' and next((y for y in x['changes'] if y.get('translation', {}).get('keyName', '').upper() == 'BORGERSTATUS' and y.get('translation', {}).get('newValue', '').upper() == 'DØD'), None)], key=lambda c: c["date"], default={}).get("date", None)
-                                if time_set_dead_last:
-                                    now = datetime.now(timezone.utc)
-                                    if (now - parse(time_set_dead_last)) > timedelta(hours=hours_elapsed_before_handling):
-                                        if execute_lukning(patient):
-                                            logger.info(f"Patient {entry['id']} has been closed")
-                                        else:
-                                            logger.warn(f"Patient {entry['id']} could not be closed")
+                        # if entry['id'] == 1:  # For testing purposes - Nency Test Berggren's patient id
+                        if entry.get('patientState', {}).get('type', {}).get('id', '').upper() == 'DEAD':
+                            request2 = NexusRequest(input_response=entry, link_href="self", method="GET")
+                            patient = execute_nexus_flow([request2])
+                            request3 = NexusRequest(input_response=patient, link_href="audit", method="GET")
+                            patient_changes = execute_nexus_flow([request3])
+                            # Find the the latest change to current state and get the datetime
+                            time_set_dead_last = max([x for x in patient_changes['auditEntries'] if x['type'] == 'CHANGE' and next((y for y in x['changes'] if y.get('translation', {}).get('keyName', '').upper() == 'BORGERSTATUS' and y.get('translation', {}).get('newValue', '').upper() == 'DØD'), None)], key=lambda c: c["date"], default={}).get("date", None)
+                            if time_set_dead_last:
+                                now = datetime.now(timezone.utc)
+                                if (now - parse(time_set_dead_last)) > timedelta(hours=hours_elapsed_before_handling):
+                                    if execute_lukning(patient):
+                                        logger.info(f"Patient {entry['id']} has been closed")
                                     else:
-                                        logger.info(f"Patient {entry['id']} has changed state less than {hours_elapsed_before_handling} hours ago - skipping")
+                                        logger.warn(f"Patient {entry['id']} could not be closed")
                                 else:
-                                    logger.warn(f"Patient {entry['id']} has no state changed to dead, cannot check time - skipping")
+                                    logger.info(f"Patient {entry['id']} has changed state less than {hours_elapsed_before_handling} hours ago - skipping")
                             else:
-                                logger.warn(f"Patient {entry['id']} is not in dead state - skipping")
+                                logger.warn(f"Patient {entry['id']} has no state changed to dead, cannot check time - skipping")
+                        else:
+                            logger.warn(f"Patient {entry['id']} is not in dead state - skipping")
                 logger.info(f"Finished iterating list id: {doede_borgere_med_aktive_forloeb_list_id}")
                 return True
             else:
@@ -101,7 +100,7 @@ def execute_lukning(patient=None):
         _cancel_events(patient)  # Afslut alle besøg fra kalenderen
         _set_conditions_inactive(patient)  # Tilstande afslutning af borgee
         _set_pathways_inactive(patient)  # "Alle borgers Handlingsanvisninger" + "Skemaer - afslutning af borger" Sætter alle til inaktive
-        remove_fsiii_indsatser(patient)  # "Indsatser - FSIII" Afslutter indsatser - TODO: 'annuller' is still missing - fix
+        _remove_fsiii_indsatser(patient)  # "Indsatser - FSIII" Afslutter indsatser - TODO: 'annuller' is still missing - fix
         # _remove_patient_grants([2298969])
 
     except Exception as e:
@@ -387,18 +386,17 @@ def _remove_patient_grants(grant_ids: list):
         logger.error(f"Error removing patient grants: {e}")
 
 
-def remove_fsiii_indsatser(patient):
+def _remove_fsiii_indsatser(patient):
     pathway_collection_header_title = ["Indsatser - FSIII"]
 
     dashboard = nexus_client.fetch_dashboard(patient, afslutning_af_borger_dashboard_id)
-
     basket_grants = next((item for item in dashboard['view']['widgets'] if item['headerTitle'] in pathway_collection_header_title), None)
     if not basket_grants:
         logger.error('Unable to find {pathway_collection_header_title} in dashboard')
     list_of_indsatser_link = basket_grants.get('_links', {}).get('pathwayReferences', {}).get('href', None)
     indsatser = nexus_client.get_request(list_of_indsatser_link)
 
-    for item in enumerate(indsatser[0].get("children", [])):
+    for item in indsatser[0].get("children", []):
         referenced_object = nexus_client.get_request(item.get('_links', {}).get('referencedObject', {}).get('href', None))
         paragraph = next((x for x in referenced_object.get('currentElements', []) if x.get('type', None) == 'paragraph'), None)
         paragraph_no = re.sub('[§ ]', '', paragraph.get('paragraph', {}).get("section", None))
@@ -406,7 +404,7 @@ def remove_fsiii_indsatser(patient):
         if paragraph_no in do_not_delete:
             logger.info(f"Skipping {item.get('name', None)} - paragraph number: {paragraph_no}")
         else:
-            afslut_object = next((item for item in referenced_object.get('currentWorkflowTransitions', []) if unidecode(item.get('name', '')).lower() in ['afslut']), None)  # TODO: add 'annuller' to the list
+            afslut_object = next((item for item in referenced_object.get('currentWorkflowTransitions', []) if unidecode(item.get('name', '')).lower() in ['afslut', 'annuller', 'fjern']), None)
             if afslut_object:
                 afslut_window = NexusRequest(input_response=afslut_object, link_href="prepareEdit", method="GET")
 
@@ -415,6 +413,6 @@ def remove_fsiii_indsatser(patient):
                 execute_nexus_flow([save_afslut_window])
                 logger.info(f"Closed {item.get('name', None)} - paragraph number: {paragraph_no}")
             else:
-                logger.warn(f"Afslut object not found for {item.get('name', None)}")  # TODO: add 'annuller' to the list
+                logger.warn(f"Afslut object not found for {item.get('name', None)}")
 
     return True
