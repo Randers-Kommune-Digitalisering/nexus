@@ -100,8 +100,7 @@ def execute_lukning(patient=None):
         _cancel_events(patient)  # Afslut alle besøg fra kalenderen
         _set_conditions_inactive(patient)  # Tilstande afslutning af borgee
         _set_pathways_inactive(patient)  # "Alle borgers Handlingsanvisninger" + "Skemaer - afslutning af borger" Sætter alle til inaktive
-        _remove_fsiii_indsatser(patient)  # "Indsatser - FSIII" Afslutter indsatser - TODO: 'annuller' is still missing - fix
-        # _remove_patient_grants([2298969])
+        _remove_fsiii_indsatser(patient)  # "Indsatser - FSIII" Afslutter indsatser
 
     except Exception as e:
         logger.error(f"Error in job: {e}")
