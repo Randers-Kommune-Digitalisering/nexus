@@ -14,12 +14,13 @@ afslutning_af_borger_dashboard_id = 6866
 doede_borgere_med_aktive_forloeb_list_id = 5029
 hours_elapsed_before_handling = 48
 
-do_not_delete = ['54', '94', '95.3', '112', '114', '116', '118', '119']
+do_not_delete = ['54', '94', '95.3', '112', '114', '116', '118', '119']  # TODO: Add paragraph numbers that should not be deleted (some are still missing)
 
 
 def job():
     try:
         logger.info("Starting Nexus Flow Lukning job")
+        return True
         if iterate_dead_list():
             logger.info("Successfully finished Nexus Flow Lukning job")
             return True
@@ -98,7 +99,7 @@ def execute_lukning(patient=None):
             return
 
         _cancel_events(patient)  # Afslut alle besøg fra kalenderen
-        _set_conditions_inactive(patient)  # Tilstande afslutning af borgee
+        _set_conditions_inactive(patient)  # Tilstande afslutning af borger
         _set_pathways_inactive(patient)  # "Alle borgers Handlingsanvisninger" + "Skemaer - afslutning af borger" Sætter alle til inaktive
         _remove_fsiii_indsatser(patient)  # "Indsatser - FSIII" Afslutter indsatser
 
@@ -403,7 +404,8 @@ def _remove_fsiii_indsatser(patient):
         if paragraph_no in do_not_delete:
             logger.info(f"Skipping {item.get('name', None)} - paragraph number: {paragraph_no}")
         else:
-            afslut_object = next((item for item in referenced_object.get('currentWorkflowTransitions', []) if unidecode(item.get('name', '')).lower() in ['afslut', 'annuller', 'fjern']), None)
+            # TODO: if any 'indsats' does not have 'afslut' after all paragraphs have been filtered. Note the 'indsats' and ask the Nexus team what do do with it.
+            afslut_object = next((item for item in referenced_object.get('currentWorkflowTransitions', []) if unidecode(item.get('name', '')).lower() in ['afslut']), None)
             if afslut_object:
                 afslut_window = NexusRequest(input_response=afslut_object, link_href="prepareEdit", method="GET")
 
