@@ -1,10 +1,9 @@
 {
     "queryList": [
         {
-            "from": "<fromTime>",
-            "to": "<toTime>",
+            "validFrom": "<validFrom>",
             "includeAuthor": false,
-            "objType": "APOS-Types-Engagement",
+            "objType": "<objType>",
             "scopeList": [
                 "BASIC",
                 "STATE",

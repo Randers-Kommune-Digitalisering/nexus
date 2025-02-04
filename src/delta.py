@@ -4,15 +4,20 @@ import base64
 import logging
 import pathlib
 import threading
-import collections
 import requests_pkcs12
 
-from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+from datetime import datetime, timedelta
+import json
+
+from utils.config import TEST
 
 logger = logging.getLogger(__name__)
 
-# Harded coded list of employment types to import TODO: FIX THIS!
-employments_to_import = [
+# TODO: Change all the dq-numbers / username to CPR or get someone to fix username in Delta/fk org for external substitutes (eksterne vikarer)
+
+# Harded coded list of employment types to import TODO: FIX THIS! (add to config library)
+position_types_to_import = [
     "Assistent HK (RG_3014)",
     "Bachelor (RG_3111)",
     "Beskæft.vejl. (RG_7313)",
@@ -42,7 +47,12 @@ employments_to_import = [
     "Sygehjælper (RG_7303)",
     "Sygeplejerske (RG_7002)",
     "Uudd Sosu (RG_7316)",
-    "Sygeplejestuderende"
+    "Sygeplejestuderende",
+    # "Specialist HK (RG_3017)"  # TODO: Remove this line  - added for testing with Jette, also get a confirmation of the list
+]
+
+job_functions_to_import = [
+    "Vikar Sosu-hjælper"  # TODO: Get the entire list of job functions to import
 ]
 
 
@@ -56,7 +66,8 @@ class DeltaClient:
         self.last_adm_org_list_updated = None
         self.adm_org_list = None
         self.cert_data = base64.b64decode(cert_base64)
-        self.payloads = {os.path.splitext(file)[0]: os.path.join(os.path.join(self.assets_path, 'payloads/'), file) for file in os.listdir(os.path.join(self.assets_path, 'payloads/')) if file.endswith('.json')}
+        # self.payloads = {os.path.splitext(file)[0]: with open(os.path.join(os.path.join(self.assets_path, 'payloads/'), file) for file in os.listdir(os.path.join(self.assets_path, 'payloads/')) if file.endswith('.json'), 'r') as f: f.read()}
+        self.payloads = {os.path.splitext(file)[0]: open(os.path.join(self.assets_path, 'payloads', file), 'r').read() for file in os.listdir(os.path.join(self.assets_path, 'payloads')) if file.endswith('.json')}
         self.headers = {'Content-Type': 'application/json'}
 
     def _get_cert_data_and_pass(self):
@@ -65,15 +76,19 @@ class DeltaClient:
         return False, False
 
     def _get_payload(self, payload_name):
-        if payload_name.endswith('.json'):
-            payload_name = os.path.splitext(payload_name)[0]
-        payload_path = self.payloads.get(payload_name)
-        if payload_path:
-            with open(payload_path, 'r') as file:
-                return file.read()
+        # if payload_name.endswith('.json'):
+        #     payload_name = os.path.splitext(payload_name)[0]
+        # payload_path = self.payloads.get(payload_name)
+        # if payload_path:
+        #     try:
+        #         with open(payload_path, 'r') as file:
+        #             return file.read()
+        #     except Exception as e:
+        #         logger.error(f'Error reading payload file: {e}')
+        if payload_name in self.payloads.keys():
+            return self.payloads[payload_name]
         else:
             logger.error(f'Payload "{payload_name}" not found.')
-            return
 
     def _set_params(self, payload, params):
         if isinstance(payload, str):
@@ -99,6 +114,7 @@ class DeltaClient:
                     return
                 url = self.base_url.rstrip('/') + path
                 response = requests_pkcs12.post(url, data=payload, headers=self.headers, pkcs12_data=cert_data, pkcs12_password=cert_pass)
+                response.raise_for_status()
                 return response
             except Exception as e:
                 logger.error(f'Error making POST request: {e}')
@@ -186,7 +202,13 @@ class DeltaClient:
 
     # returns a dictionaries with the admin organization unit UUID as the key and a list of sub admin organization unit UUIDs as the value
     def get_adm_org_list(self):
-        if not self.adm_org_list:
+        if TEST and not self.adm_org_list:
+            logger.info('Test update')
+            data_path = os.path.join(self.assets_path, 'data')
+            with open(os.path.join(data_path, 'adm_org_list.json'), 'r') as json_file:
+                self.adm_org_list = json.load(json_file)
+                self.last_adm_org_list_updated = datetime.now()
+        elif not self.adm_org_list:
             logger.info('Foreground update')
             self._update_job()
         else:
@@ -196,6 +218,12 @@ class DeltaClient:
                     self._update_adm_org_list_background()
             else:
                 self._update_adm_org_list_background()
+
+        # Write adm_org_list to JSON file - for testing purposes
+        data_path = os.path.join(self.assets_path, 'data')
+        with open(os.path.join(data_path, 'adm_org_list.json'), 'w') as json_file:
+            json.dump(self.adm_org_list, json_file)
+
         return self.adm_org_list
 
     # Returns all ids in the adm org list dict as a list
@@ -203,101 +231,139 @@ class DeltaClient:
         return [item for key, values in self.get_adm_org_list().items() for item in [key] + values]
 
     # Returns a list of dictionaries with key 'user' containing DQ-numberand key 'organizations' containing a list of UUIDs for organizations they need access to
-    def get_employees_changed(self, time_back_days=30):
+    # TODO: Add more information to the return value - type of employee (intern / ekstern vikar, fastansat) or if they should have their supplier (standard leverandør) set and if they should their position (stillingsbetegnelse) set
+    def get_employees_changed(self, date=datetime.today()):
+        # Helper functions
+        def relevant_time_or_type_of_change(employee_delta_dict, date):
+            changes_to_look_for = ['APOS-Types-Engagement-TypeRelation-AdmUnit',  # AdmUnit (arbejdsplads)
+                                   'APOS-Types-Engagement-TypeRelation-Position',  # Position (stillingsbetegnelse)
+                                   'APOS-Types-Engagement-TypeRelation-AdditionalAssociation',  # AdditionalAssociation (forhold ved intern vikar, der indeholder arbejdsplads)
+                                   'APOS-Types-Engagement-TypeRelation-Jobfunctions']  # Jobfunctions (jobfunktion, brugt for vikarer), ekstra stillingsbetegnelse
+
+            state_change = True if employee_delta_dict.get('stateBiList', []) else False
+            added_on_date = [obj for obj in employee_delta_dict.get('typeRefBiList', []) if obj.get('validityInterval', {}).get('from', '') == date.strftime("%Y-%m-%d") and obj.get('value', {}).get('userKey') in changes_to_look_for]
+            removed_on_date = [obj for obj in employee_delta_dict.get('closedTypeRefBiList', []) if obj.get('value', {}).get('userKey') in changes_to_look_for]
+            return any([state_change, added_on_date, removed_on_date])
+
+        def unpack_employee_details(employee_details_response):
+            query_results = employee_details_response.json().get('graphQueryResult', [])
+            instances = query_results[0].get('instances', []) if query_results else []
+            if instances:
+                uuid, state = instances[0].get('identity', {}).get('uuid', None), instances[0].get('state', None)
+                if not state or not uuid:
+                    logger.error(f'No state or uuid found for employee: {uuid}')
+                    return
+                user, org, postion, jobs_add, jobs_remove, aa_orgs_add, aa_orgs_remove = None, None, None, [], [], [], []
+                for type_ref in instances[0].get('typeRefs', []) + instances[0].get('inTypeRefs', []):
+                    if type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-AdditionalAssociation':
+                        if type_ref.get('targetObject', {}).get('state', '') == 'STATE_ACTIVE':
+                            aa_type_refs = type_ref.get('targetObject', {}).get('typeRefs', [])
+                            if aa_type_refs:
+                                aa_orgs_add.append(aa_type_refs[0].get('targetObject', {}).get('identity', {}).get('uuid', None))
+                        elif type_ref.get('targetObject', {}).get('state', '') == 'STATE_INACTIVE':
+                            aa_type_refs = type_ref.get('targetObject', {}).get('typeRefs', [])
+                            if aa_type_refs:
+                                aa_orgs_remove.append(aa_type_refs[0].get('targetObject', {}).get('identity', {}).get('uuid', None))
+                    elif type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-Jobfunction':
+                        if type_ref.get('targetObject', {}).get('state', '') == 'STATE_ACTIVE':
+                            jobs_add.append(type_ref.get('targetObject', {}).get('identity', {}).get('userKey', None))
+                        elif type_ref.get('targetObject', {}).get('state', '') == 'STATE_INACTIVE':
+                            jobs_remove.append(type_ref.get('targetObject', {}).get('identity', {}).get('userKey', None))
+                    elif type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-AdministrativeUnit':
+                        org = type_ref.get('targetObject', {}).get('identity', {}).get('uuid', None)
+                    elif type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-PositionType':
+                        postion = type_ref.get('targetObject', {}).get('identity', {}).get('userKey', None)
+                    elif type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-User':
+                        if user:
+                            logger.warning(f'Multiple users found for employee: {uuid}')
+                            return
+                        else:
+                            user = type_ref.get('targetObject', {}).get('identity', {}).get('userKey', None)
+
+                if not user:
+                    # A lot of employees do not have a user and should be ignored for Nexus changes
+                    logger.debug(f'No user found for employee: {uuid}')
+                    return
+
+                return {'uuid': uuid, 'state': state, 'user': user, 'position': postion, 'org': org, 'jobs_add': jobs_add, 'jobs_remove': jobs_remove, 'aa_orgs_add': aa_orgs_add, 'aa_orgs_remove': aa_orgs_remove}
+            else:
+                logger.error(f'No instances found in employee details response. Response. {employee_details_response}')
+
+        # Main function
         try:
+            # Get employees with relevant changes
             adm_org_units_with_employees = self.get_adm_org_list()
             if not adm_org_units_with_employees:
                 raise Exception('Error getting adm. org. units with employees.')
 
-            start = time.time()
-            payload_changes = self._get_payload('employee_changes')
+            payload_employee_changes = self._get_payload('history')
+            if not payload_employee_changes:
+                raise Exception('Error getting payload for employee changes.')
 
-            # Delta uses UTC time
-            time_back_days = timedelta(days=time_back_days)
-            from_time = (datetime.now(tz=timezone.utc) - time_back_days).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + 'Z'
-            to_time = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + 'Z'
+            payload_employee_changes_with_params = self._set_params(payload_employee_changes, {'validFrom':  date.strftime("%Y-%m-%d"), "objType": "APOS-Types-Engagement"})
+            if not payload_employee_changes_with_params:
+                raise Exception('Error setting params for employee changes.')
 
-            payload_changes_with_params = self._set_params(payload_changes, {'fromTime': from_time, "toTime": to_time})
+            res_employee_changes = self._make_post_request(payload_employee_changes_with_params)
+            if res_employee_changes:
+                query_results = res_employee_changes.json().get('queryResultList', [])
+                registrations = query_results[0].get('registrationList', []) if query_results else []
+                # filter out employee changes which are valid on a later date than 'date'
+                all_employee_changes = [reg for reg in registrations if reg.get('validityDate', None) == date.strftime("%Y-%m-%d")]
+                employees_with_relevant_changes = [change['objectUuid'] for change in all_employee_changes if relevant_time_or_type_of_change(change, date)]
+            else:
+                raise Exception('Error getting employee changes.')
 
-            r = self._make_post_request(payload_changes_with_params)
-            r.raise_for_status()
+            # Get employee details
+            employees_to_change = defaultdict(list)
+            for employee_uuid in employees_with_relevant_changes:
+                employee_details_payload = self._get_payload('employee_details')
+                if not employee_details_payload:
+                    raise Exception('Error getting payload for employee details.')
 
-            changes_list = []
-            json_res = r.json()
-            employee_changed_list = []
+                employee_details_payload_with_params = self._set_params(employee_details_payload, {'uuid': employee_uuid})
+                if not employee_details_payload_with_params:
+                    raise Exception('Error setting params for employee details.')
 
-            # Function to parse the from date
-            def get_from_date(employee_change):
-                return datetime.strptime(employee_change['validityInterval']['from'], '%Y-%m-%d')
+                res_employee_details = self._make_post_request(employee_details_payload_with_params)
+                if res_employee_details:
+                    employee_details = unpack_employee_details(res_employee_details)
+                    if employee_details:
+                        if employee_details['state'] == 'STATE_ACTIVE':
+                            orgs = []
+                            if any([job in job_functions_to_import for job in employee_details['jobs_add']]):
+                                # Internal substitutes (interne vikarer) has an additional associations and job functions
+                                if employee_details['aa_orgs_add']:
+                                    for aa_org in employee_details['aa_orgs_add']:
+                                        if aa_org in adm_org_units_with_employees.keys():
+                                            orgs = orgs + [aa_org] + adm_org_units_with_employees[aa_org]
+                                # External substitutes (eksterne vikarer) has no additional associations but job functions and an organization (administrativ enhed)
+                                elif employee_details['org'] in adm_org_units_with_employees.keys():
+                                    orgs = orgs + [employee_details['org']] + adm_org_units_with_employees[employee_details['org']]
 
-            # If any changes
-            if len(json_res['queryResultList'][0]['registrationList']) > 0:
-                # Iterate over changes
-                for change in json_res['queryResultList'][0]['registrationList']:
-                    # Adm. org. unit changes
-                    if len(change['typeRefBiList']) > 0:
-                        filtered_ec = [ec for ec in change['typeRefBiList'] if ec['value']['userKey'] == 'APOS-Types-Engagement-TypeRelation-AdmUnit' and ec["value"]["refObjIdentity"]['uuid'] in adm_org_units_with_employees.keys()]
-                        ec = max(filtered_ec, key=get_from_date, default=None)
-                        # Changed to an admin unit with employees
-                        if ec:
-                            changes_list.append({'employee': change['objectUuid'], 'admunit': ec["value"]["refObjIdentity"]['uuid'], 'regDateTime': datetime.strptime(change['regDateTime'], '%Y-%m-%dT%H:%M:%S.%fZ'), 'validityDate': datetime.strptime(change['validityDate'], '%Y-%m-%d')})
+                            if employee_details['position'] in position_types_to_import:
+                                # Regular employees has a position and an organization (administrativ enhed), internal substitutes (interne vikarer) can be regular employees
+                                if employee_details['org'] in adm_org_units_with_employees.keys():
+                                    orgs = orgs + [employee_details['org']] + adm_org_units_with_employees[employee_details['org']]
 
-                    # State inactive changes -TODO: Is this needed?
-                    # if len(change['closedStateBiList']) > 0:
-                    #     ec = max(change['closedStateBiList'], key=get_from_date, default=None)
-                    #     if ec:
-                    #         changes_list.append({'employee': change['objectUuid'], 'regDateTime': datetime.strptime(change['regDateTime'], '%Y-%m-%dT%H:%M:%S.%fZ'), 'validityDate': datetime.strptime(change['validityDate'], '%Y-%m-%d')})
-
-            # Split _list into a list of lists (for each employee)
-            by_employee = collections.defaultdict(list)
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-
-            for d in changes_list:
-                # Only keep changes that are valid today or in the past
-                if d['validityDate'] <= today:
-                    by_employee[d['employee']].append(d)
-
-            # Only keep the lastest for each employee
-            employee_list = []
-            for same_employee_list in list(by_employee.values()):
-                same_employee_list = sorted(same_employee_list, key=lambda x: x['validityDate'], reverse=True)
-                same_employee_list = [same_employee_list[0]] if same_employee_list else []
-                employee_list.extend(same_employee_list)
-
-            if len(employee_list) > 0:
-                payload_employee = self._get_payload('employee_dq_number')
-                for employee in employee_list:
-                    dq_number = None
-                    employment_type = None
-                    current_adm_unit = None
-                    payload_employee_with_params = self._set_params(payload_employee, {'uuid': employee['employee']})
-                    r = self._make_post_request(payload_employee_with_params)
-                    r.raise_for_status()
-                    json_res = r.json()
-                    if len(json_res['queryResults'][0]['instances']) > 0:
-                        first_res = json_res['queryResults'][0]['instances'][0]
-                        # Check employee is active - TODO: should also get inactive employees, they need to be set inactive in Nexus
-                        if first_res['state'] == 'STATE_ACTIVE' and len(first_res['typeRefs']) > 0:
-                            for relation in first_res['typeRefs']:
-                                if relation['userKey'] == 'APOS-Types-Engagement-TypeRelation-AdmUnit':
-                                    current_adm_unit = relation['refObjIdentity']['uuid']
-                                    if len(first_res["inTypeRefs"]) > 0:
-                                        for ref in first_res["inTypeRefs"]:
-                                            if ref['refObjTypeUserKey'] == 'APOS-Types-User':
-                                                dq_number = ref['refObjIdentity']['userKey']
-                                elif relation['userKey'] == 'APOS-Types-Engagement-TypeRelation-Position':
-                                    employment_type = relation['refObjIdentity']['userKey']
-
-                    if dq_number and employment_type in employments_to_import:
-                        # Add employee to dictionary with key DQ number and value admin unit UUID
-                        if current_adm_unit in adm_org_units_with_employees.keys():
-                            employee_changed_list.append({'user': dq_number, 'organizations': [employee['admunit']] + adm_org_units_with_employees[employee['admunit']]})
+                            # Filter if connected to Nexus
+                            if any([any([job in job_functions_to_import for job in employee_details['jobs_add']]),
+                                    any([org in adm_org_units_with_employees.keys() for org in employee_details['aa_orgs_add']]),
+                                    any([job in job_functions_to_import for job in employee_details['jobs_remove']]),
+                                    any([org in adm_org_units_with_employees.keys() for org in employee_details['aa_orgs_remove']]),
+                                    (employee_details['position'] in position_types_to_import and employee_details['org'] in adm_org_units_with_employees.keys())]):
+                                employees_to_change[employee_details['user']].extend(orgs)
                         else:
-                            employee_changed_list.append({'user': dq_number, 'organizations': []})
+                            pass  # do nothing with inactive users - Nexus/FK Org should handle this
+                            # Filter if connected to Nexus
+                            # if any([any([job in job_functions_to_import for job in employee_details['jobs_remove']]),
+                            #         any([org in adm_org_units_with_employees.keys() for org in employee_details['aa_orgs_remove']]),
+                            #         (employee_details['position'] in position_types_to_import and employee_details['org'] in adm_org_units_with_employees.keys())]):
+                            #     employees_to_change[employee_details['user']].extend([])
+                else:
+                    logger.warning(f'Error getting employee details for {employee_uuid} - continuing')
 
-            logger.info(f'Employees with changes {len(employee_changed_list)}')
-            logger.info(f'Got employee changes in {str(timedelta(seconds=(time.time() - start)))}')
-            return employee_changed_list
+            return employees_to_change
 
         except Exception as e:
             logger.error(f'Error getting employee changes: {e}')

@@ -6,9 +6,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-DEBUG = os.getenv('DEBUG', 'False') in ['True', 'true']
-PORT = os.getenv('PORT', '8080')
-POD_NAME = os.getenv('POD_NAME', 'pod_name_not_set')
+DEBUG = os.getenv('DEBUG', 'False').strip() in ['True', 'true']
+TEST = os.getenv('TEST', 'False').strip() in ['True', 'true']
+PORT = os.getenv('PORT', '8080').strip()
+POD_NAME = os.getenv('POD_NAME', 'pod_name_not_set').strip()
 
 # Delta
 DELTA_TOP_ADM_UNIT_UUID = os.environ['DELTA_TOP_ADM_UNIT_UUID'].strip()

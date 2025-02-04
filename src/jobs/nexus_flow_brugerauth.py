@@ -10,17 +10,29 @@ nexus_client = NexusClient(NEXUS_CLIENT_ID, NEXUS_CLIENT_SECRET, NEXUS_URL)
 delta_client = DeltaClient(cert_base64=DELTA_CERT_BASE64, cert_pass=DELTA_CERT_PASS, base_url=DELTA_BASE_URL, top_adm_org_uuid=DELTA_TOP_ADM_UNIT_UUID)
 
 
+# TODO: Add "stillingsbetegnelse" for external substitutes (eksterne vikarer)
+# TODO: Handle the different users types (intern vikar, fastansat, ekstern vikar)
+# TODO: Change all the dq-numbers / username to CPR or get someone to fix username in Delta/fk org for external substitutes (eksterne vikarer)
+
+
 def job():
     try:
-        active_org_list = _fetch_all_active_organisations()
         all_delta_orgs = delta_client.get_all_organizations()
+        active_org_list = _fetch_all_active_organisations(all_delta_orgs)
+
+        # from datetime import datetime
+        # employees_changed_list = delta_client.get_employees_changed(date=datetime(2025, 2, 3))
+        # print(employees_changed_list)
+        # return True
+
         employees_changed_list = delta_client.get_employees_changed()
+
         if employees_changed_list:
             logger.info("Employees changed - updating Nexus from external system")
             _sync_orgs_and_users()
             for index, employee in enumerate(employees_changed_list):
                 logger.info(f"Processing employee {index + 1}/{len(employees_changed_list)}")
-                execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs)
+                execute_brugerauth(active_org_list, employee, employees_changed_list[employee], all_delta_orgs)
         else:
             logger.info("No employees changed")
         return True
@@ -32,26 +44,29 @@ def job():
 def execute_brugerauth(active_org_list: list, primary_identifier: str, input_organisation_uuid_list: list, all_organisation_uuid_list: list = None):
     professional = _fetch_professional(primary_identifier)
 
+    # TODO: All professionals should already be in Nexus?
+
     if not professional:
-        logger.info(f"Professional {primary_identifier} not found in Nexus - creating")
-        new_professional = _fetch_external_professional(primary_identifier)
-        if new_professional:
-            professional = nexus_client.post_request(new_professional['_links']['create']['href'], json=new_professional)
-            if professional:
-                logger.info(f"Professional {primary_identifier} created")
-            else:
-                logger.error(f"Failed to create professional {primary_identifier} - skipping")
-                return
-        else:
-            logger.error(f"Professional {primary_identifier} not found in external system - skipping")
-            return
+        raise Exception(f"Professional {primary_identifier} not found in Nexus")
+        # logger.info(f"Professional {primary_identifier} not found in Nexus - creating")
+        # new_professional = _fetch_external_professional(primary_identifier)
+        # if new_professional:
+        #     professional = nexus_client.post_request(new_professional['_links']['create']['href'], json=new_professional)
+        #     if professional:
+        #         logger.info(f"Professional {primary_identifier} created")
+        #     else:
+        #         logger.error(f"Failed to create professional {primary_identifier} - skipping")
+        #         return
+        # else:
+        #     logger.error(f"Professional {primary_identifier} not found in external system - skipping")
+        #     return
 
     # Get all assigned organisations for professional as list of dicts - [0] being id, [1] being uuid
     professional_org_list = _fetch_professional_org_syncIds(professional)
     # logger.info(f"Professional current organisation: {professional_org_list}")
 
     # uuids from active_org_list not found in input_organisation_uuid_list
-    organisation_ids_to_assign = [item['id'] for item in active_org_list if item['sync_id'] in input_organisation_uuid_list]
+    organisation_ids_to_assign = [item['id'] for item in active_org_list if item['syncId'] in input_organisation_uuid_list]
 
     # Filter out IDs present in professional_org_list
     unassigned_organisation_ids_to_assign = [org_id for org_id in organisation_ids_to_assign if org_id not in [item['id'] for item in professional_org_list]]
@@ -61,7 +76,7 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
 
     # Get a list of all delta uuid which are not set for the user and get corosponding nexus ids
     uuids_to_remove = list(set(all_organisation_uuid_list) - set(input_organisation_uuid_list))
-    organisation_ids_to_remove = [item['id'] for item in active_org_list if item['sync_id'] in uuids_to_remove]
+    organisation_ids_to_remove = [item['id'] for item in active_org_list if item['syncId'] in uuids_to_remove]
 
     # Filter out IDs not present in professional_org_list and remove duplicates
     assigned_organisation_ids_to_remove = [org_id for org_id in organisation_ids_to_remove if org_id in [item['id'] for item in professional_org_list]]
@@ -79,8 +94,10 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
 
         # Get top organisation's supplier
         if input_organisation_uuid_list:
-            current = next((item for item in active_org_list if item['sync_id'] == input_organisation_uuid_list[0]), None)
+            current = next((item for item in active_org_list if item['syncId'] == input_organisation_uuid_list[0]), None)
             supplier = current.get('supplier')
+
+            # TODO: Only update supplier if user is a substitue (vikar)
 
             # If it has a supplier update it
             if supplier:
@@ -89,7 +106,7 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
                 else:
                     logger.error(f"Failed to update professional {primary_identifier} with supplier")
             else:
-                logger.info(f'Top organisation for professional {primary_identifier} has a  no supplier - not updating')
+                logger.info(f'Top organisation for professional {primary_identifier} has no supplier - not updating')
 
         logger.info(f'Professional {primary_identifier} updated sucessfully')
     except Exception as e:
@@ -245,25 +262,25 @@ def _add_supplier_ids(organisation_ids: list, suppliers: list):
         elif org.get('syncId') == "455c1030-8ad4-4da9-98d0-656ce864f2fb":
             supplier = next((item for item in suppliers if item.get('id') == 419), None)
             if not supplier:
-                logger.warn(f"Supplier not found for organisation {org['name']}")
+                logger.warning(f"Supplier not found for organisation {org['name']}")
             org['supplier'] = supplier
         # Special case for Plejecentret Solbakken
         elif org.get('syncId') == "7a0887f8-e713-4877-8d19-c06a9698f574":
             supplier = next((item for item in suppliers if item.get('id') == 77), None)
             if not supplier:
-                logger.warn(f"Supplier not found for organisation {org['name']}")
+                logger.warning(f"Supplier not found for organisation {org['name']}")
             org['supplier'] = supplier
         # Special case for Distrikt Kollektivhuset
         elif org.get('syncId') == "bdcc0024-0bae-4017-854b-37d36328c50e":
             supplier = next((item for item in suppliers if item.get('id') == 431), None)
             if not supplier:
-                logger.warn(f"Supplier not found for organisation {org['name']}")
+                logger.warning(f"Supplier not found for organisation {org['name']}")
             org['supplier'] = supplier
         # Special case for Hospice Randers
         elif org.get('syncId') == "608350bc-e60e-44ab-81b1-22e8757ccefb":
             supplier = next((item for item in suppliers if item.get('id') == 69), None)
             if not supplier:
-                logger.warn(f"Supplier not found for organisation {org['name']}")
+                logger.warning(f"Supplier not found for organisation {org['name']}")
             org['supplier'] = supplier
         else:
             # Find supplier with organizationId equal to org id

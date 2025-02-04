@@ -1,0 +1,130 @@
+{
+    "graphQueries": [
+        {
+            "parameterMap": {
+                "employeeUuid": "<uuid>"
+            },
+            "computeAvailablePages": false,
+            "graphQuery": {
+                "structure": {
+                    "alias": "employee",
+                    "userKey": "APOS-Types-Engagement",
+                    "relations": [
+                        {
+                            "alias": "aa",
+                            "title": "APOS-Types-Engagement-TypeRelation-AdditionalAssociation",
+                            "userKey": "APOS-Types-Engagement-TypeRelation-AdditionalAssociation",
+                            "typeUserKey": "APOS-Types-AdditionalAssociation",
+                            "direction": "OUT",
+                            "relations": [
+                                {
+                                    "alias": "aaAdmOrg",
+                                    "title": "APOS-Types-AdditionalAssociation-TypeRelation-AdmUnit",
+                                    "userKey": "APOS-Types-AdditionalAssociation-TypeRelation-AdmUnit",
+                                    "typeUserKey": "APOS-Types-AdmUnit",
+                                    "direction": "OUT"
+                                }
+                            ]
+                        },
+                        {
+                            "alias": "admOrg",
+                            "title": "APOS-Types-Engagement-TypeRelation-AdmUnit",
+                            "userKey": "APOS-Types-Engagement-TypeRelation-AdmUnit",
+                            "typeUserKey": "APOS-Types-AdmUnit",
+                            "direction": "OUT"
+                        },
+                        {
+                            "alias": "position",
+                            "title": "APOS-Types-Engagement-TypeRelation-Position",
+                            "userKey": "APOS-Types-Engagement-TypeRelation-Position",
+                            "typeUserKey": "APOS-Types-Position",
+                            "direction": "OUT"
+                        },
+                                                {
+                            "alias": "jobfunction",
+                            "title": "APOS-Types-Engagement-TypeRelation-Jobfunctions",
+                            "userKey": "APOS-Types-Engagement-TypeRelation-Jobfunctions",
+                            "typeUserKey": "APOS-Types-Jobfunction",
+                            "direction": "OUT"
+                        },
+                        {
+                            "alias": "user",
+                            "title": "APOS-Types-User-TypeRelation-Engagement",
+                            "userKey": "APOS-Types-User-TypeRelation-Engagement",
+                            "typeUserKey": "APOS-Types-User",
+                            "direction": "IN"
+                        }
+                    ]
+                },
+                "parameters": [
+                    {
+                        "key": "employeeUuid",
+                        "name": "Employee UUID"
+                    }
+                ],
+                "criteria": {
+                    "type": "AND",
+                    "criteria": [
+                        {
+                            "type": "MATCH",
+                            "operator": "EQUAL",
+                            "left": {
+                                "source": "DEFINITION",
+                                "alias": "employee.$uuid"
+                            },
+                            "right": {
+                                "source": "PARAMETER",
+                                "key": "employeeUuid"
+                            }
+                        }
+                    ]
+                },
+                "projection": {
+                    "state": true,
+                    "typeRelations": [
+                        {
+                            "userKey": "APOS-Types-Engagement-TypeRelation-AdmUnit",
+                            "projection": {}
+                        },
+                        {
+                            "userKey": "APOS-Types-Engagement-TypeRelation-Position",
+                            "projection": {
+                                "identity":true
+                            }
+                        },
+                        {
+                            "userKey": "APOS-Types-Engagement-TypeRelation-Jobfunctions",
+                            "projection": {
+                                "state": true,
+                                "identity":true
+                            }
+                        },
+                        {
+                            "userKey": "APOS-Types-Engagement-TypeRelation-AdditionalAssociation",
+                            "projection": {
+                                "state": true,
+                                "typeRelations": [
+                                    {
+                                        "userKey": "APOS-Types-AdditionalAssociation-TypeRelation-AdmUnit",
+                                        "projection": {}
+                                    }
+                                ]               
+                            }
+                        }
+                    ],
+                    "incomingTypeRelations": [
+                        {
+                            "userKey": "APOS-Types-User-TypeRelation-Engagement",
+                            "projection": {
+                                "identity": true
+                            }
+                        }
+                    ]
+                }
+            },
+            "validDate": "NOW",
+            "offset": 0,
+            "limit": 1
+        }
+    ]
+}
