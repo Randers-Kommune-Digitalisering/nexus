@@ -52,7 +52,7 @@ position_types_to_import = [
 ]
 
 job_functions_to_import = [
-    "Vikar Sosu-hjælper"  # TODO: Get the entire list of job functions to import
+    "Vikar i plejesektoren"  # TODO: Get the correct list of job functions to import
 ]
 
 
@@ -230,7 +230,7 @@ class DeltaClient:
     def get_all_organizations(self):
         return [item for key, values in self.get_adm_org_list().items() for item in [key] + values]
 
-    # Returns a list of dictionaries with key 'user' containing DQ-numberand key 'organizations' containing a list of UUIDs for organizations they need access to
+    # Returns a list of dictionaries with key 'user' containing DQ-number and key 'organizations' containing a list of UUIDs for organizations they need access to
     # TODO: Add more information to the return value - type of employee (intern / ekstern vikar, fastansat) or if they should have their supplier (standard leverandør) set and if they should their position (stillingsbetegnelse) set
     def get_employees_changed(self, date=datetime.today()):
         # Helper functions
@@ -253,7 +253,7 @@ class DeltaClient:
                 if not state or not uuid:
                     logger.error(f'No state or uuid found for employee: {uuid}')
                     return
-                user, org, postion, jobs_add, jobs_remove, aa_orgs_add, aa_orgs_remove = None, None, None, [], [], [], []
+                user, cpr, name, org, postion, jobs_add, jobs_remove, aa_orgs_add, aa_orgs_remove = None, None, None, None, None, [], [], [], []
                 for type_ref in instances[0].get('typeRefs', []) + instances[0].get('inTypeRefs', []):
                     if type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-AdditionalAssociation':
                         if type_ref.get('targetObject', {}).get('state', '') == 'STATE_ACTIVE':
@@ -273,6 +273,9 @@ class DeltaClient:
                         org = type_ref.get('targetObject', {}).get('identity', {}).get('uuid', None)
                     elif type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-PositionType':
                         postion = type_ref.get('targetObject', {}).get('identity', {}).get('userKey', None)
+                    elif type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-Person':
+                        cpr = type_ref.get('targetObject', {}).get('identity', {}).get('userKey', None)
+                        name = type_ref.get('targetObject', {}).get('identity', {}).get('name', None)
                     elif type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-User':
                         if user:
                             logger.warning(f'Multiple users found for employee: {uuid}')
@@ -285,7 +288,7 @@ class DeltaClient:
                     logger.debug(f'No user found for employee: {uuid}')
                     return
 
-                return {'uuid': uuid, 'state': state, 'user': user, 'position': postion, 'org': org, 'jobs_add': jobs_add, 'jobs_remove': jobs_remove, 'aa_orgs_add': aa_orgs_add, 'aa_orgs_remove': aa_orgs_remove}
+                return {'uuid': uuid, 'state': state, 'user': user, 'cpr': cpr, 'name': name, 'position': postion, 'org': org, 'jobs_add': jobs_add, 'jobs_remove': jobs_remove, 'aa_orgs_add': aa_orgs_add, 'aa_orgs_remove': aa_orgs_remove}
             else:
                 logger.error(f'No instances found in employee details response. Response. {employee_details_response}')
 
@@ -315,7 +318,8 @@ class DeltaClient:
                 raise Exception('Error getting employee changes.')
 
             # Get employee details
-            employees_to_change = defaultdict(list)
+            employee_orgs_dict = defaultdict(list)
+            employee_detail_dict = defaultdict(dict)
             for employee_uuid in employees_with_relevant_changes:
                 employee_details_payload = self._get_payload('employee_details')
                 if not employee_details_payload:
@@ -329,6 +333,7 @@ class DeltaClient:
                 if res_employee_details:
                     employee_details = unpack_employee_details(res_employee_details)
                     if employee_details:
+                        employee_details['set_job_title'] = False
                         if employee_details['state'] == 'STATE_ACTIVE':
                             orgs = []
                             if any([job in job_functions_to_import for job in employee_details['jobs_add']]):
@@ -340,6 +345,7 @@ class DeltaClient:
                                 # External substitutes (eksterne vikarer) has no additional associations but job functions and an organization (administrativ enhed)
                                 elif employee_details['org'] in adm_org_units_with_employees.keys():
                                     orgs = orgs + [employee_details['org']] + adm_org_units_with_employees[employee_details['org']]
+                                    employee_details['set_job_title'] = True
 
                             if employee_details['position'] in position_types_to_import:
                                 # Regular employees has a position and an organization (administrativ enhed), internal substitutes (interne vikarer) can be regular employees
@@ -352,7 +358,8 @@ class DeltaClient:
                                     any([job in job_functions_to_import for job in employee_details['jobs_remove']]),
                                     any([org in adm_org_units_with_employees.keys() for org in employee_details['aa_orgs_remove']]),
                                     (employee_details['position'] in position_types_to_import and employee_details['org'] in adm_org_units_with_employees.keys())]):
-                                employees_to_change[employee_details['user']].extend(orgs)
+                                employee_orgs_dict[employee_details['uuid']].extend(orgs)
+                                employee_detail_dict[employee_details['uuid']].update(employee_details)
                         else:
                             pass  # do nothing with inactive users - Nexus/FK Org should handle this
                             # Filter if connected to Nexus
@@ -362,6 +369,14 @@ class DeltaClient:
                             #     employees_to_change[employee_details['user']].extend([])
                 else:
                     logger.warning(f'Error getting employee details for {employee_uuid} - continuing')
+
+            employees_to_change = []
+
+            for e in employee_orgs_dict:
+                employee = {'user': employee_detail_dict[e]['user'], 'cpr': employee_detail_dict[e]['cpr'], 'name': employee_detail_dict[e]['name'], 'organizations': employee_orgs_dict[e]}
+                if len(employee_detail_dict[e]['jobs_add']) == 1 and employee_detail_dict[e]['set_job_title']:
+                    employee['job_title'] = employee_detail_dict[e]['jobs_add'][0]
+                employees_to_change.append(employee)
 
             return employees_to_change
 

@@ -53,6 +53,13 @@
                             "userKey": "APOS-Types-User-TypeRelation-Engagement",
                             "typeUserKey": "APOS-Types-User",
                             "direction": "IN"
+                        },
+                        {
+                            "alias": "person",
+                            "title": "APOS-Types-Engagement-TypeRelation-Person",
+                            "userKey": "APOS-Types-Engagement-TypeRelation-Person",
+                            "typeUserKey": "APOS-Types-Person",
+                            "direction": "OUT"
                         }
                     ]
                 },
@@ -94,6 +101,13 @@
                         },
                         {
                             "userKey": "APOS-Types-Engagement-TypeRelation-Jobfunctions",
+                            "projection": {
+                                "state": true,
+                                "identity":true
+                            }
+                        },
+                        {
+                            "userKey": "APOS-Types-Engagement-TypeRelation-Person",
                             "projection": {
                                 "state": true,
                                 "identity":true

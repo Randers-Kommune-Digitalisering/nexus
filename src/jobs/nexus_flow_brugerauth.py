@@ -19,11 +19,19 @@ def job():
     try:
         all_delta_orgs = delta_client.get_all_organizations()
         active_org_list = _fetch_all_active_organisations(all_delta_orgs)
+        all_job_title_list = _fetch_all_job_titles()
 
         # from datetime import datetime
         # employees_changed_list = delta_client.get_employees_changed(date=datetime(2025, 2, 3))
         # print(employees_changed_list)
-        # return True
+        employees_changed_list = delta_client.get_employees_changed()
+        for e in employees_changed_list:
+            ansat = {'navn': e['name']}
+            if e.get('job_title', None):
+                ansat['stillingsbetegnelse'] = e['job_title']
+            krydser = [item for item in e['organizations']]
+
+        return True
 
         employees_changed_list = delta_client.get_employees_changed()
 
@@ -32,7 +40,12 @@ def job():
             _sync_orgs_and_users()
             for index, employee in enumerate(employees_changed_list):
                 logger.info(f"Processing employee {index + 1}/{len(employees_changed_list)}")
-                execute_brugerauth(active_org_list, employee, employees_changed_list[employee], all_delta_orgs)
+                if employee.get('job_title', None):
+                    # execute_brugerauth(active_org_list, "DQKL008", employee['organizations'], all_delta_orgs, "Sosu-hjælper", all_job_title_list)
+                    execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs, employee['job_title'], all_job_title_list)
+                else:
+                    pass
+                    # execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs)
         else:
             logger.info("No employees changed")
         return True
@@ -41,7 +54,7 @@ def job():
         return False
 
 
-def execute_brugerauth(active_org_list: list, primary_identifier: str, input_organisation_uuid_list: list, all_organisation_uuid_list: list = None):
+def execute_brugerauth(active_org_list: list, primary_identifier: str, input_organisation_uuid_list: list, all_organisation_uuid_list: list = None, job_title: str = None, all_job_title_list: list = None):
     professional = _fetch_professional(primary_identifier)
 
     # TODO: All professionals should already be in Nexus?
@@ -101,12 +114,22 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
 
             # If it has a supplier update it
             if supplier:
-                if _update_professional_supplier(professional, supplier, primary_identifier):
+                if _update_professional_supplier(professional, supplier):  # TODO: Remove, primary_identifier):
                     logger.info(f"Professional {primary_identifier} updated with supplier")
                 else:
                     logger.error(f"Failed to update professional {primary_identifier} with supplier")
             else:
                 logger.info(f'Top organisation for professional {primary_identifier} has no supplier - not updating')
+
+        if job_title and all_job_title_list:
+            job_title_obj = next((item for item in all_job_title_list if item.get('name') == 'Sosu-hjælper' and item.get('active')), None)
+            if job_title_obj:
+                if _update_professional_job_title(professional, job_title_obj):
+                    logger.info(f"Professional {primary_identifier} updated with job title")
+                else:
+                    logger.error(f"Failed to update professional {primary_identifier} with job title")
+            else:
+                logger.warning(f"Job title '{job_title}' not found in Nexus - not updating")
 
         logger.info(f'Professional {primary_identifier} updated sucessfully')
     except Exception as e:
@@ -160,7 +183,7 @@ def _update_professional_organisations(professional, organisation_ids_to_add, or
     return professional_org_change_list
 
 
-def _update_professional_supplier(professional, supplier, primary_identifier):
+def _update_professional_supplier(professional, supplier):  # TODO: Remove, primary_identifier):
     # Professional self
     request = NexusRequest(input_response=professional, link_href="self", method="GET")
     professional_self = execute_nexus_flow([request])
@@ -170,6 +193,20 @@ def _update_professional_supplier(professional, supplier, primary_identifier):
     professional_config = execute_nexus_flow([request])
 
     professional_config['defaultOrganizationSupplier'] = supplier
+    request = NexusRequest(input_response=professional_config, link_href='update', method='PUT', payload=professional_config)
+    return execute_nexus_flow([request])
+
+
+def _update_professional_job_title(professional, job_title):
+    # Professional self
+    request = NexusRequest(input_response=professional, link_href="self", method="GET")
+    professional_self = execute_nexus_flow([request])
+
+    # Professional configuration
+    request = NexusRequest(input_response=professional_self, link_href="configuration", method="GET")
+    professional_config = execute_nexus_flow([request])
+
+    professional_config['professionalJob'] = job_title
     request = NexusRequest(input_response=professional_config, link_href='update', method='PUT', payload=professional_config)
     return execute_nexus_flow([request])
 
@@ -190,6 +227,16 @@ def _fetch_professional_org_syncIds(professional):
     # Get all assigned organisations for professional
     professional_org_list = execute_nexus_flow(professional_org_request_list)
     return _collect_syncIds_from_list_or_org(professional_org_list)
+
+
+def _fetch_all_job_titles():
+    # Home resource
+    home_resource = nexus_client.home_resource()
+
+    # Active organisations
+    request1 = NexusRequest(input_response=home_resource, link_href="professionalJobs", method="GET")
+
+    return execute_nexus_flow([request1])
 
 
 def _fetch_all_active_organisations(delta_orgs: list):
