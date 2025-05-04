@@ -20,4 +20,10 @@ DELTA_BASE_URL = os.environ['DELTA_BASE_URL'].strip()
 NEXUS_URL = os.environ["NEXUS_URL"].strip()
 NEXUS_CLIENT_ID = os.environ["NEXUS_CLIENT_ID"].strip()
 NEXUS_CLIENT_SECRET = os.environ["NEXUS_CLIENT_SECRET"].strip()
-NEXUS_TOKEN_ROUTE = os.environ["NEXUS_TOKEN_ROUTE"].strip()
+NEXUS_REALM = os.environ["NEXUS_REALM"].strip()
+NEXUS_AUTH_TYPE = os.environ["NEXUS_AUTH_TYPE"].strip()
+
+# SMS
+SMS_URL = "https://smssys.dk/sms"
+SMS_USER = os.environ["SMS_USER"].strip()
+SMS_PASS = os.environ["SMS_PASS"].strip()

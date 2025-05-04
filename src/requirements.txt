@@ -4,6 +4,7 @@ pymssql
 py-healthcheck
 pysftp
 psycopg2
+pytz
 prometheus-client
 python-dotenv
 requests==2.31.0
