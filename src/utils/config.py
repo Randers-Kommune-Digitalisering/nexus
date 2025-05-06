@@ -12,9 +12,11 @@ POD_NAME = os.getenv('POD_NAME', 'pod_name_not_set')
 
 # Delta
 DELTA_TOP_ADM_UNIT_UUID = os.environ['DELTA_TOP_ADM_UNIT_UUID'].strip()
-DELTA_CERT_BASE64 = os.environ['DELTA_CERT_BASE64'].strip()
-DELTA_CERT_PASS = os.environ['DELTA_CERT_PASS'].strip()
-DELTA_BASE_URL = os.environ['DELTA_BASE_URL'].strip()
+DELTA_URL = os.environ['DELTA_URL'].rstrip()
+DELTA_CLIENT_ID = os.environ["DELTA_CLIENT_ID"].strip()
+DELTA_CLIENT_SECRET = os.environ["DELTA_CLIENT_SECRET"].strip()
+DELTA_REALM = '730'
+DELTA_AUTH_URL = "https://idp.opus-universe.kmd.dk"
 
 # NEXUS
 NEXUS_URL = os.environ["NEXUS_URL"].strip()

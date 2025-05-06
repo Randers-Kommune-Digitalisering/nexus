@@ -1,13 +1,16 @@
 import os
 import time
-import base64
+# import base64
 import logging
 import pathlib
 import threading
 import collections
-import requests_pkcs12
+# import requests_pkcs12
 
 from datetime import datetime, timedelta, timezone
+
+from utils.api_requests import APIClient
+from utils.config import DELTA_URL, DELTA_CLIENT_ID, DELTA_CLIENT_SECRET, DELTA_REALM, DELTA_AUTH_URL, DELTA_TOP_ADM_UNIT_UUID
 
 logger = logging.getLogger(__name__)
 
@@ -46,23 +49,14 @@ employments_to_import = [
 ]
 
 
-class DeltaClient:
-    def __init__(self, cert_base64, cert_pass, base_url, top_adm_org_uuid, relative_assets_path='assets/delta/'):
-        self.cert_base64 = cert_base64
-        self.cert_pass = cert_pass
-        self.base_url = base_url
-        self.top_adm_org_uuid = top_adm_org_uuid
+class DeltaClient(APIClient):
+    def __init__(self, relative_assets_path='assets/delta/'):
+        self.top_adm_org_uuid = DELTA_TOP_ADM_UNIT_UUID
         self.assets_path = os.path.join(pathlib.Path(__file__).parent.resolve(), relative_assets_path)
         self.last_adm_org_list_updated = None
         self.adm_org_list = None
-        self.cert_data = base64.b64decode(cert_base64)
         self.payloads = {os.path.splitext(file)[0]: os.path.join(os.path.join(self.assets_path, 'payloads/'), file) for file in os.listdir(os.path.join(self.assets_path, 'payloads/')) if file.endswith('.json')}
-        self.headers = {'Content-Type': 'application/json'}
-
-    def _get_cert_data_and_pass(self):
-        if self.cert_data is not None and self.cert_pass is not None:
-            return self.cert_data, self.cert_pass
-        return False, False
+        super().__init__(base_url=DELTA_URL, auth_url=DELTA_AUTH_URL, realm=DELTA_REALM, client_id=DELTA_CLIENT_ID, client_secret=DELTA_CLIENT_SECRET, add_auth_to_path=False)
 
     def _get_payload(self, payload_name):
         if payload_name.endswith('.json'):
@@ -90,21 +84,16 @@ class DeltaClient:
         return payload
 
     def _make_post_request(self, payload):
-        cert_data, cert_pass = self._get_cert_data_and_pass()
-        if cert_data and cert_pass:
-            try:
-                path = '/query' if 'queries' in payload else '/graph-query' if 'graphQueries' in payload else '/history' if 'queryList' in payload else None
-                if not path:
-                    logger.error('Payload is invalid.')
-                    return
-                url = self.base_url.rstrip('/') + path
-                response = requests_pkcs12.post(url, data=payload, headers=self.headers, pkcs12_data=cert_data, pkcs12_password=cert_pass)
-                return response
-            except Exception as e:
-                logger.error(f'Error making POST request: {e}')
-        else:
-            logger.error('Certificate path or password is invalid.')
-        return
+        try:
+            path = '/query' if 'queries' in payload else '/graph-query' if 'graphQueries' in payload else '/history' if 'queryList' in payload else None
+            if not path:
+                logger.error('Payload is invalid.')
+                return
+            url = 'api/object' + path
+            response = self.make_request(method='POST', path=url, data=payload, headers={'Content-Type': 'application/json'})
+            return response
+        except Exception as e:
+            logger.error(f'Error making POST request: {e}')
 
     def _recursive_get_adm_org_units(self, adm_unit_tree_json, list_of_adm_units):
         for adm in adm_unit_tree_json:
@@ -123,9 +112,7 @@ class DeltaClient:
                 if not payload_with_params:
                     logger.error('Error setting payload params.')
                     return
-                r = self._make_post_request(payload_with_params)
-                r.raise_for_status()
-                json_res = r.json()
+                json_res = self._make_post_request(payload_with_params)
                 if len(json_res['graphQueryResult'][0]['instances']) > 0:
                     sub_adm_orgs = []
                     self._recursive_get_adm_org_units(json_res['graphQueryResult'][0]['instances'], sub_adm_orgs)
@@ -155,9 +142,7 @@ class DeltaClient:
             if not payload_with_params:
                 logger.error('Error setting payload params.')
                 return
-            r = self._make_post_request(payload_with_params)
-            r.raise_for_status()
-            json_res = r.json()
+            json_res = self._make_post_request(payload_with_params)
             if len(json_res['graphQueryResult'][0]['instances']) > 0:
                 adm_org_list = []
                 self._recursive_get_adm_org_units(json_res['graphQueryResult'][0]['instances'], adm_org_list)
@@ -219,11 +204,10 @@ class DeltaClient:
 
             payload_changes_with_params = self._set_params(payload_changes, {'fromTime': from_time, "toTime": to_time})
 
-            r = self._make_post_request(payload_changes_with_params)
-            r.raise_for_status()
+            json_res = self._make_post_request(payload_changes_with_params)
 
             changes_list = []
-            json_res = r.json()
+            # json_res = r.json()
             employee_changed_list = []
 
             # Function to parse the from date
@@ -271,9 +255,8 @@ class DeltaClient:
                     employment_type = None
                     current_adm_unit = None
                     payload_employee_with_params = self._set_params(payload_employee, {'uuid': employee['employee']})
-                    r = self._make_post_request(payload_employee_with_params)
-                    r.raise_for_status()
-                    json_res = r.json()
+
+                    json_res = self._make_post_request(payload_employee_with_params)
                     if len(json_res['queryResults'][0]['instances']) > 0:
                         first_res = json_res['queryResults'][0]['instances'][0]
                         # Check employee is active - TODO: should also get inactive employees, they need to be set inactive in Nexus
