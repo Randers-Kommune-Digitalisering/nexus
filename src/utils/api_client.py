@@ -85,7 +85,8 @@ class APIClient:
             elif self.username and self.password:
                 auth_str = f"{self.username}:{self.password}"
                 b64_auth_str = base64.b64encode(auth_str.encode()).decode()
-                return {'Authorization': f'Basic {b64_auth_str}'}
+                auth_header = {'Authorization': f'Basic {b64_auth_str}'}
+                return auth_header
             else:
                 return {}
         except Exception as e:
@@ -128,14 +129,4 @@ class APIClient:
         if 'json' in kwargs:
             kwargs['headers']['Content-Type'] = 'application/json'
 
-        response = method(url, **kwargs)
-        if response.status_code != 200:
-            logger.info(response.content)
-        response.raise_for_status()
-
-        if 'application/json' in response.headers.get('Content-Type', ''):
-            return response.json()
-        else:
-            if not response.content:
-                return b' '
-            return response.content
+        return method(url, **kwargs)

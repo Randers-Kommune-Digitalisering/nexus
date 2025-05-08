@@ -29,3 +29,6 @@ NEXUS_AUTH_TYPE = os.environ["NEXUS_AUTH_TYPE"].strip()
 SMS_URL = "https://smssys.dk/sms"
 SMS_USER = os.environ["SMS_USER"].strip()
 SMS_PASS = os.environ["SMS_PASS"].strip()
+
+# Door codes
+DOOR_CODES = os.environ["DOOR_CODES"].strip().split(",")

@@ -11,13 +11,7 @@ sms_client = APIClient(SMS_URL, username=SMS_USER, password=SMS_PASS)
 
 # Constants
 first_number_for_mobile_phones = [2, 30, 31, 40, 41, 42, 50, 51, 52, 53, 60, 61, 71, 81, 91, 92, 93]
-gsm_charset = ("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÆØÅabcdefghijklmnopqrstuvwxyzæøåàèìòùÄÖÜäöüÉéÑñç¥ß,.-:;!?&%<=>'\"()*+/#@£$_¤§¿¡^{}[]~|\\ \n")
-xml_template = """<?xml version="1.0" encoding="UTF-8"?>
-<sms>
-    <countrycode>45</countrycode>
-    <number>{phone_number}</number>
-    <message>{message}</message>
-</sms>"""
+xml_template = '<?xml version="1.0" encoding="UTF-8"?><sms><countrycode>45</countrycode><number>{phone_number}</number><message>{message}</message></sms>'
 
 
 def send_sms(phone_number, text_message):
@@ -25,25 +19,25 @@ def send_sms(phone_number, text_message):
         cleaned_phone_number = check_if_mobile_number_and_clean(phone_number)
         if not cleaned_phone_number:
             raise ValueError("Ikke et gyldigt mobilnummer")
-        if not is_gsm(text_message):
+        if any(char in text_message for char in "&<>"):
             raise ValueError("Ulovlig charakter i besked.")
         try:
-            text_message = clean_message(text_message)
             xml_payload = xml_template.format(phone_number=cleaned_phone_number, message=text_message)
 
-            response = sms_client.make_request(data=xml_payload, headers={"Content-Type": "application/xml; charset=utf-8"})
+            response = sms_client.make_request(data=xml_payload.encode('utf-8'), headers={"Content-Type": "application/xml; charset=utf-8"})
+
             response_xml = response.text
 
             root = ET.fromstring(response_xml)
             description = root.find(".//description").text
 
-            return description + "\n"
+            return description +  f" - for number: {phone_number}\n"
         except Exception as e:
             logger.error(f"Error sending SMS: {e}")
-            raise ValueError("Ukendt fejl")
+            raise ValueError("Unknown error")
     except Exception as e:
         logger.warning(f"Error sending SMS: {e}")
-        return str(e) + f": {phone_number}\n"
+        return "Error sending SMS:" + str(e) + f" - for number: {phone_number}\n"
 
 
 # Helper functions
@@ -59,12 +53,3 @@ def check_if_mobile_number_and_clean(number):
         return number
     else:
         return False
-
-
-def is_gsm(message):
-    return all(char in gsm_charset for char in message)
-
-
-def clean_message(message):
-    message = ' '.join(html.escape(message.strip()).replace("\n", "\\n").replace("\t", " ").split())
-    return message
