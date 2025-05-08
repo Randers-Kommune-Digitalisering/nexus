@@ -1,5 +1,4 @@
 import logging
-import html
 
 from xml.etree import ElementTree as ET
 
@@ -31,7 +30,7 @@ def send_sms(phone_number, text_message):
             root = ET.fromstring(response_xml)
             description = root.find(".//description").text
 
-            return description +  f" - for number: {phone_number}\n"
+            return description + f" - for number: {phone_number}\n"
         except Exception as e:
             logger.error(f"Error sending SMS: {e}")
             raise ValueError("Unknown error")
