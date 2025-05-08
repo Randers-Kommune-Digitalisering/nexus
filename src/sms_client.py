@@ -30,13 +30,17 @@ def send_sms(phone_number, text_message):
             root = ET.fromstring(response_xml)
             description = root.find(".//description").text
 
-            return description + f" - for number: {phone_number}\n"
+            if description.lower() == "message handled successfully":
+                return f"SMS sendt til {phone_number}"
+            else:
+                logger.error(f"Error in SMS response: {description}")
+                raise Exception("Fejl")
         except Exception as e:
             logger.error(f"Error sending SMS: {e}")
-            raise ValueError("Unknown error")
+            raise Exception("Fejl")
     except Exception as e:
         logger.warning(f"Error sending SMS: {e}")
-        return "Error sending SMS:" + str(e) + f" - for number: {phone_number}\n"
+        return str(e) + f" - kunne ikke sende SMS til {phone_number}"
 
 
 # Helper functions

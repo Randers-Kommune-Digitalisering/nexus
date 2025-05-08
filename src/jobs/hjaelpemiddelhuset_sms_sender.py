@@ -10,8 +10,8 @@ from sms_client import send_sms
 logger = logging.getLogger(__name__)
 nexus_client = NexusClient(NEXUS_CLIENT_ID, NEXUS_CLIENT_SECRET, NEXUS_URL)
 
-MSG_PREFIX = "\n*** Beskded fra SMS service ***\n"
-MSG_SUFFIX = "*** *** *** *** *** *** *** ***\n"
+MSG_PREFIX = "\n***Beskded fra SMS service "
+MSG_SUFFIX = "***\n"
 
 message_template = """Hej {navn}
 Dine hjælpemidler er klar til afhentning på Hjælpemiddelhuset Kronjylland, Randers kommune.
@@ -54,27 +54,25 @@ def job():
             for _, value in order.get("phones", {}).items():
                 phone_numbers.append(value)
 
-            message = ''
+            message = MSG_PREFIX + f"{datetime.datetime.now(pytz.timezone('Europe/Copenhagen')).strftime('%d/%m/%Y %H:%M:%S')}: "
 
             if not phone_numbers:
                 logger.info(f"Order {order.get('uid', 'unknown id')} has no phone numbers")
-                message = MSG_PREFIX + "Ingen telefonnumre tilknyttet ordren." + MSG_SUFFIX
+                message = MSG_PREFIX + "Ingen telefonnumre tilknyttet ordren" + MSG_SUFFIX
             else:
                 name = get_patient_name(home, order['patientId'])
                 if name:
                     text_message = construct_message(name, order['orderNumber'])
                     if text_message:
-                        message = MSG_PREFIX
                         for phone_number in phone_numbers:
-                            timestamp = f"{datetime.datetime.now(pytz.timezone('Europe/Copenhagen')).strftime('%d-%m-%Y %H:%M:%S')} - "
-                            message += timestamp + send_sms(phone_number, text_message)
-                        message += MSG_SUFFIX
+                            message += send_sms(phone_number, text_message)
+                        message = message.rstrip(', ') + MSG_SUFFIX
                     else:
                         logger.error("Malformed text message!")
                         return False
                 else:
                     logger.warning(f"Order {order.get('uid', 'unknown id')} has no name")
-                    message = MSG_PREFIX + "Intet navn tilknyttet ordren." + MSG_SUFFIX
+                    message = MSG_PREFIX + "Intet navn tilknyttet ordren" + MSG_SUFFIX
             # Updating the order with a message in the delivery note
             nexus_client.put_request(order['_links']['update']['href'], json={"phones": order['phones'], "requestedDeliveryDate": order['requestedDeliveryDate'], "deliveryNote": order['deliveryNote'] + message})
         logger.info("SMS service job completed successfully")
