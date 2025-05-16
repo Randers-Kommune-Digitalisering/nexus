@@ -47,7 +47,7 @@ def send_sms(phone_number, text_message):
 def check_if_mobile_number_and_clean(number):
     if number.startswith("+45"):
         number = number[3:]
-    elif number.startswith("45"):
+    elif number.startswith("45") and len(number) > 8:
         number = number[2:]
     elif number.startswith("0"):
         number = number[1:]

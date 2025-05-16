@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 nexus_client = NexusClient(NEXUS_CLIENT_ID, NEXUS_CLIENT_SECRET, NEXUS_URL)
 
 MSG_PREFIX = "\n***Beskded fra SMS service "
-MSG_SUFFIX = "***\n"
+MSG_SUFFIX = " ***\n"
 
 message_template = """Hej {navn}
 Dine hjælpemidler er klar til afhentning på Hjælpemiddelhuset Kronjylland, Randers kommune.
@@ -66,6 +66,7 @@ def job():
                     if text_message:
                         for phone_number in phone_numbers:
                             message += send_sms(phone_number, text_message)
+                            message += ", "
                         message = message.rstrip(', ') + MSG_SUFFIX
                     else:
                         logger.error("Malformed text message!")
