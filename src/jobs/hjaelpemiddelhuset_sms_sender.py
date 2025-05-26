@@ -17,12 +17,12 @@ message_template = """Hej {navn}
 Dine hjælpemidler er klar til afhentning på Hjælpemiddelhuset Kronjylland, Randers kommune.
 Agerskellet 22, 8920 Randers NV
 
-Hvis du henter udenfor åbningstiden, skal du anvende nedenstående kode og ordre ID.
+Når du henter dine hjælpemidler, skal du anvende følgende ordre-id. Dit ordre ID: {ordreid}
+
+Hvis du henter udenfor åbningstiden, skal du anvende nedenstående kode.
 Du bedes afhente dine hjælpemidler indenfor 3 dage.
 
 Din kode til hoveddøren er: {doerkode}
-
-Dit ordre ID: {ordreid}
 
 Hvis du vil vide mere:
 https://www.randers.dk/borger/socialt/hjaelpemidler-og-hjaelp/hjaelpemiddelhuset/
@@ -33,6 +33,8 @@ Tak for din hjælp og god dag.
 
 Venlig hilsen
 Hjælpemiddelhuset Kronjylland
+
+Denne sms kan ikke besvares.
 """
 
 
