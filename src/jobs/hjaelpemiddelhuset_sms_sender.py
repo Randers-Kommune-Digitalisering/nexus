@@ -48,8 +48,8 @@ def job():
             request1 = NexusRequest(input_response=item, link_href="self", method="GET")
             order = execute_nexus_flow([request1])
 
-            if 'deliveryNote' not in order:
-                logger.warning(f"Order {order.get('uid', 'unknown id')} has no delivery note. Skipping.")
+            if not all(k in order for k in ['deliveryNote', 'requestedDeliveryDate', 'phones']):
+                logger.warning(f"Order {order.get('uid', 'unknown id')} is missing required fields. Skipping.")
                 continue
 
             delivery_note = order.get('deliveryNote', '')
@@ -75,15 +75,17 @@ def job():
             else:
                 name = get_patient_name(home, order['patientId'])
                 if name:
-                    text_message = construct_message(name, order_number)
-                    if text_message:
-                        for phone_number in phone_numbers:
-                            message += send_sms(phone_number, text_message)
-                            message += ", "
-                        message = message.rstrip(', ') + MSG_SUFFIX
-                    else:
-                        logger.error("Malformed text message!")
-                        return False
+                    # Updating order with the same info to ensure it can be updated later
+                    if nexus_client.put_request(order['_links']['update']['href'], json={"phones": order['phones'], "requestedDeliveryDate": order['requestedDeliveryDate'], "deliveryNote": delivery_note}):
+                        text_message = construct_message(name, order_number)
+                        if text_message:
+                            for phone_number in phone_numbers:
+                                message += send_sms(phone_number, text_message)
+                                message += ", "
+                            message = message.rstrip(', ') + MSG_SUFFIX
+                        else:
+                            logger.error("Malformed text message!")
+                            return False
                 else:
                     logger.warning(f"Order {order.get('uid', 'unknown id')} has no name")
                     message = MSG_PREFIX + "Intet navn tilknyttet ordren" + MSG_SUFFIX
