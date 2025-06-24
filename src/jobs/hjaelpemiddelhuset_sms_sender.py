@@ -86,6 +86,9 @@ def job():
                         else:
                             logger.error("Malformed text message!")
                             return False
+                    else:
+                        logger.error(f"Failed to update order {order.get('uid', 'unknown id')}")
+                        continue
                 else:
                     logger.warning(f"Order {order.get('uid', 'unknown id')} has no name")
                     message = MSG_PREFIX + "Intet navn tilknyttet ordren" + MSG_SUFFIX
