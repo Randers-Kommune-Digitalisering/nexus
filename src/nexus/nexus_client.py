@@ -3,7 +3,7 @@ import time
 import requests
 from typing import Dict, Tuple, List, Optional
 from base_api_client import BaseAPIClient
-from utils.config import NEXUS_URL, NEXUS_CLIENT_ID, NEXUS_CLIENT_SECRET, NEXUS_TOKEN_ROUTE
+from utils.config import NEXUS_URL, NEXUS_CLIENT_ID, NEXUS_CLIENT_SECRET, NEXUS_AUTH_TYPE, NEXUS_REALM
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class NexusAPIClient(BaseAPIClient):
         return client
 
     def request_access_token(self):
-        token_url = f"{self.base_url}/{NEXUS_TOKEN_ROUTE}"
+        token_url = f"{self.base_url}/{NEXUS_AUTH_TYPE}/realms/{NEXUS_REALM}/protocol/openid-connect/token"
         payload = {
             "grant_type": "client_credentials",
             "client_id": self.client_id,
@@ -54,7 +54,7 @@ class NexusAPIClient(BaseAPIClient):
             return None
 
     def refresh_access_token(self):
-        token_url = f"{self.base_url}/{NEXUS_TOKEN_ROUTE}"
+        token_url = f"{self.base_url}/{NEXUS_AUTH_TYPE}/realms/{NEXUS_REALM}/protocol/openid-connect/token"
         payload = {
             "grant_type": "refresh_token",
             "client_id": self.client_id,
@@ -99,7 +99,7 @@ class NexusClient:
         self.api_client = NexusAPIClient.get_client(client_id, client_secret, url)
 
     def home_resource(self):
-        path = "api/core/mobile/randers/v2/"
+        path = f"api/core/mobile/{NEXUS_REALM}/v2/"
         return self.get_request(path)
 
     def find_professional_by_query(self, query):
@@ -263,6 +263,9 @@ class NexusRequest:
         # Handle URL parameters
         if self.params:
             final_url += '?' + '&'.join([f"{key}={value}" for key, value in self.params.items()])
+
+        if not final_url.startswith("https://"):
+            final_url = f"{nexus_client.api_client.base_url}{final_url}"
 
         if self.method == 'GET':
             response = nexus_client.get_request(final_url)
