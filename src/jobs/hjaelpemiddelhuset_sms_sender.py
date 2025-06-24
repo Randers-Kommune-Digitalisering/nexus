@@ -48,7 +48,7 @@ def job():
             request1 = NexusRequest(input_response=item, link_href="self", method="GET")
             order = execute_nexus_flow([request1])
 
-            if 'deveryNote' not in order:
+            if 'deliveryNote' not in order:
                 logger.warning(f"Order {order.get('uid', 'unknown id')} has no delivery note. Skipping.")
                 continue
 
