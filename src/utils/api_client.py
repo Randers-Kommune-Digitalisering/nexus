@@ -70,7 +70,7 @@ class APIClient:
 
                 now = time.time()
 
-                response = requests.post(tmp_url, headers=tmp_headers, data=tmp_url)
+                response = requests.post(tmp_url, headers=tmp_headers, data=tmp_json_data)
                 response.raise_for_status()
                 data = response.json()
 
