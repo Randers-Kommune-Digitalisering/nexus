@@ -48,8 +48,19 @@ def job():
             request1 = NexusRequest(input_response=item, link_href="self", method="GET")
             order = execute_nexus_flow([request1])
 
-            if MSG_PREFIX in order.get('deliveryNote', ''):
+            if 'deveryNote' not in order:
+                logger.warning(f"Order {order.get('uid', 'unknown id')} has no delivery note. Skipping.")
+                continue
+
+            delivery_note = order.get('deliveryNote', '')
+            order_number = order.get('orderNumber', None)            
+
+            if MSG_PREFIX in delivery_note:
                 logger.info(f"Order {order.get('uid', 'unknown id')} has already been handled. Skipping.")
+                continue
+
+            if not order_number:
+                logger.warning(f"Order {order.get('uid', 'unknown id')} has no order number. Skipping.")
                 continue
 
             phone_numbers = []
@@ -64,7 +75,7 @@ def job():
             else:
                 name = get_patient_name(home, order['patientId'])
                 if name:
-                    text_message = construct_message(name, order['orderNumber'])
+                    text_message = construct_message(name, order_number)
                     if text_message:
                         for phone_number in phone_numbers:
                             message += send_sms(phone_number, text_message)
@@ -77,7 +88,7 @@ def job():
                     logger.warning(f"Order {order.get('uid', 'unknown id')} has no name")
                     message = MSG_PREFIX + "Intet navn tilknyttet ordren" + MSG_SUFFIX
             # Updating the order with a message in the delivery note
-            nexus_client.put_request(order['_links']['update']['href'], json={"phones": order['phones'], "requestedDeliveryDate": order['requestedDeliveryDate'], "deliveryNote": order['deliveryNote'] + message})
+            nexus_client.put_request(order['_links']['update']['href'], json={"phones": order['phones'], "requestedDeliveryDate": order['requestedDeliveryDate'], "deliveryNote": delivery_note + message})
         logger.info("SMS service job completed successfully")
         return True
     except Exception as e:
