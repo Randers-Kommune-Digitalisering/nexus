@@ -56,7 +56,7 @@ def job():
             order_number = order.get('orderNumber', None)
 
             if MSG_PREFIX in delivery_note:
-                logger.info(f"Order {order.get('uid', 'unknown id')} has already been handled. Skipping.")
+                # logger.info(f"Order {order.get('uid', 'unknown id')} has already been handled. Skipping.")
                 continue
 
             if not order_number:
