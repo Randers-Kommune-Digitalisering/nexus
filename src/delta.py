@@ -287,10 +287,10 @@ class DeltaClient(APIClient):
             if not payload_employee_changes:
                 raise Exception('Error getting payload for employee changes.')
 
-            payload_employee_changes_with_params = self._set_params(payload_employee_changes, {'validFrom':  date.strftime("%Y-%m-%d"), "objType": "APOS-Types-Engagement"})
+            payload_employee_changes_with_params = self._set_params(payload_employee_changes, {'validFrom': date.strftime("%Y-%m-%d"), "objType": "APOS-Types-Engagement"})
             if not payload_employee_changes_with_params:
                 raise Exception('Error setting params for employee changes.')
-            
+
             print(f'Getting employee changes for date: {date.strftime("%Y-%m-%d")}')
             res_employee_changes = self._make_post_request(payload_employee_changes_with_params)
             if res_employee_changes:
@@ -387,7 +387,7 @@ class DeltaClient(APIClient):
         payload_all_employments = self._get_payload('all_employments')
         if not payload_all_employments:
             raise Exception('Error getting payload for all employments.')
-        
+
         payload_all_employments_with_params = self._set_params(payload_all_employments, {'validDate': date.strftime("%Y-%m-%d")})
 
         res_all_employments = self._make_post_request(payload_all_employments_with_params)
@@ -399,8 +399,6 @@ class DeltaClient(APIClient):
 
         all_employments = query_results[0].get('instances', [])
 
-        print(len(all_employments), ' employments found')
-
         regular_employees_and_external_substitutes = [
             emp for emp in all_employments
             if any(
@@ -409,28 +407,16 @@ class DeltaClient(APIClient):
             )
         ]
 
-        # print(len(regular_employees_and_external_substitutes), 'regular employees and external substitutes found')
-
         external_substitutes = [
             emp for emp in regular_employees_and_external_substitutes
-            if any(
-                tref.get('userKey') == "APOS-Types-Engagement-TypeRelation-Jobfunctions"
-                and tref.get('targetObject', {}).get('identity', {}).get('userKey') in job_functions_to_import
-                for tref in emp.get('typeRefs', [])
-            )
-        ]
-
-        print(len(external_substitutes), 'External substitutes found')
+            if any(tref.get('userKey') == "APOS-Types-Engagement-TypeRelation-Jobfunctions" and tref.get('targetObject', {}).get('identity', {}).get('userKey') in job_functions_to_import for tref in emp.get('typeRefs', []))]
 
         internal_substitutes = [
             emp for emp in all_employments
             if any(
                 (
-                    tref.get('userKey') == "APOS-Types-Engagement-TypeRelation-AdditionalAssociation"
-                    and tref.get('targetObject', {}).get('state', {}) == 'STATE_ACTIVE'
-                    and any(
-                        ttref.get('userKey') == "APOS-Types-AdditionalAssociation-TypeRelation-AdmUnit"
-                        and ttref.get('targetObject', {}).get('identity', {}).get('uuid') in adm_org_units_with_employees.keys()
+                    tref.get('userKey') == "APOS-Types-Engagement-TypeRelation-AdditionalAssociation" and tref.get('targetObject', {}).get('state', {}) == 'STATE_ACTIVE' and any(
+                        ttref.get('userKey') == "APOS-Types-AdditionalAssociation-TypeRelation-AdmUnit" and ttref.get('targetObject', {}).get('identity', {}).get('uuid') in adm_org_units_with_employees.keys()
                         for ttref in tref.get('targetObject', {}).get('typeRefs', [])
                     )
                 )
@@ -438,11 +424,9 @@ class DeltaClient(APIClient):
             )
         ]
 
-        print(len(internal_substitutes), 'internal substitutes found')
-
         regular_employees = [
             emp for emp in regular_employees_and_external_substitutes
             if emp not in external_substitutes
         ]
 
-        print(len(regular_employees), 'regular employees found')
+        return external_substitutes, internal_substitutes, regular_employees
