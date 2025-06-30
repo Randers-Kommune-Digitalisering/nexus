@@ -1,20 +1,20 @@
 import os
 import time
-import base64
+# import base64
 import logging
 import pathlib
 import threading
-import requests_pkcs12
+# import requests_pkcs12
 
 from collections import defaultdict
 from datetime import datetime, timedelta
 import json
 
-from utils.config import TEST
+from utils.api_requests import APIClient
+from utils.config import DELTA_URL, DELTA_CLIENT_ID, DELTA_CLIENT_SECRET, DELTA_REALM, DELTA_AUTH_URL, DELTA_TOP_ADM_UNIT_UUID, TEST
+
 
 logger = logging.getLogger(__name__)
-
-# TODO: Change all the dq-numbers / username to CPR or get someone to fix username in Delta/fk org for external substitutes (eksterne vikarer)
 
 # Harded coded list of employment types to import TODO: FIX THIS! (add to config library)
 position_types_to_import = [
@@ -48,47 +48,42 @@ position_types_to_import = [
     "Sygeplejerske (RG_7002)",
     "Uudd Sosu (RG_7316)",
     "Sygeplejestuderende",
+    "Sosu uden udd. (RG_7316)",
+    "Pædagogisk ass (RG_6446)",
+    "ErnæringsAss (RG_7007)",
     # "Specialist HK (RG_3017)"  # TODO: Remove this line  - added for testing with Jette, also get a confirmation of the list
 ]
 
 job_functions_to_import = [
-    "Vikar i plejesektoren"  # TODO: Get the correct list of job functions to import
+    "Vikar Sygeplejestuderende",
+    "Vikar Sosu-hjælper",
+    "Vikar Inde Sosu-assistent",
+    "Vikar Ude Sosu-assistent",
+    "Vikar Inde sygeplejerske",
+    "Vikar Ude Sygeplejerske",
+    # "Vikar i plejesektoren"  # TODO: Remove thsi line - no longer used
 ]
 
 
-class DeltaClient:
-    def __init__(self, cert_base64, cert_pass, base_url, top_adm_org_uuid, relative_assets_path='assets/delta/'):
-        self.cert_base64 = cert_base64
-        self.cert_pass = cert_pass
-        self.base_url = base_url
-        self.top_adm_org_uuid = top_adm_org_uuid
+class DeltaClient(APIClient):
+    def __init__(self, relative_assets_path='assets/delta/'):
+        self.top_adm_org_uuid = DELTA_TOP_ADM_UNIT_UUID
         self.assets_path = os.path.join(pathlib.Path(__file__).parent.resolve(), relative_assets_path)
         self.last_adm_org_list_updated = None
         self.adm_org_list = None
-        self.cert_data = base64.b64decode(cert_base64)
-        # self.payloads = {os.path.splitext(file)[0]: with open(os.path.join(os.path.join(self.assets_path, 'payloads/'), file) for file in os.listdir(os.path.join(self.assets_path, 'payloads/')) if file.endswith('.json'), 'r') as f: f.read()}
-        self.payloads = {os.path.splitext(file)[0]: open(os.path.join(self.assets_path, 'payloads', file), 'r').read() for file in os.listdir(os.path.join(self.assets_path, 'payloads')) if file.endswith('.json')}
-        self.headers = {'Content-Type': 'application/json'}
-
-    def _get_cert_data_and_pass(self):
-        if self.cert_data is not None and self.cert_pass is not None:
-            return self.cert_data, self.cert_pass
-        return False, False
+        self.payloads = {os.path.splitext(file)[0]: os.path.join(os.path.join(self.assets_path, 'payloads/'), file) for file in os.listdir(os.path.join(self.assets_path, 'payloads/')) if file.endswith('.json')}
+        super().__init__(base_url=DELTA_URL, auth_url=DELTA_AUTH_URL, realm=DELTA_REALM, client_id=DELTA_CLIENT_ID, client_secret=DELTA_CLIENT_SECRET, add_auth_to_path=False)
 
     def _get_payload(self, payload_name):
-        # if payload_name.endswith('.json'):
-        #     payload_name = os.path.splitext(payload_name)[0]
-        # payload_path = self.payloads.get(payload_name)
-        # if payload_path:
-        #     try:
-        #         with open(payload_path, 'r') as file:
-        #             return file.read()
-        #     except Exception as e:
-        #         logger.error(f'Error reading payload file: {e}')
-        if payload_name in self.payloads.keys():
-            return self.payloads[payload_name]
+        if payload_name.endswith('.json'):
+            payload_name = os.path.splitext(payload_name)[0]
+        payload_path = self.payloads.get(payload_name)
+        if payload_path:
+            with open(payload_path, 'r') as file:
+                return file.read()
         else:
             logger.error(f'Payload "{payload_name}" not found.')
+            return
 
     def _set_params(self, payload, params):
         if isinstance(payload, str):
@@ -105,22 +100,16 @@ class DeltaClient:
         return payload
 
     def _make_post_request(self, payload):
-        cert_data, cert_pass = self._get_cert_data_and_pass()
-        if cert_data and cert_pass:
-            try:
-                path = '/query' if 'queries' in payload else '/graph-query' if 'graphQueries' in payload else '/history' if 'queryList' in payload else None
-                if not path:
-                    logger.error('Payload is invalid.')
-                    return
-                url = self.base_url.rstrip('/') + path
-                response = requests_pkcs12.post(url, data=payload, headers=self.headers, pkcs12_data=cert_data, pkcs12_password=cert_pass)
-                response.raise_for_status()
-                return response
-            except Exception as e:
-                logger.error(f'Error making POST request: {e}')
-        else:
-            logger.error('Certificate path or password is invalid.')
-        return
+        try:
+            path = '/query' if 'queries' in payload else '/graph-query' if 'graphQueries' in payload else '/history' if 'queryList' in payload else None
+            if not path:
+                logger.error('Payload is invalid.')
+                return
+            url = 'api/object' + path
+            response = self.make_request(method='POST', path=url, data=payload, headers={'Content-Type': 'application/json'})
+            return response
+        except Exception as e:
+            logger.error(f'Error making POST request: {e}')
 
     def _recursive_get_adm_org_units(self, adm_unit_tree_json, list_of_adm_units):
         for adm in adm_unit_tree_json:
@@ -139,9 +128,7 @@ class DeltaClient:
                 if not payload_with_params:
                     logger.error('Error setting payload params.')
                     return
-                r = self._make_post_request(payload_with_params)
-                r.raise_for_status()
-                json_res = r.json()
+                json_res = self._make_post_request(payload_with_params)
                 if len(json_res['graphQueryResult'][0]['instances']) > 0:
                     sub_adm_orgs = []
                     self._recursive_get_adm_org_units(json_res['graphQueryResult'][0]['instances'], sub_adm_orgs)
@@ -171,9 +158,7 @@ class DeltaClient:
             if not payload_with_params:
                 logger.error('Error setting payload params.')
                 return
-            r = self._make_post_request(payload_with_params)
-            r.raise_for_status()
-            json_res = r.json()
+            json_res = self._make_post_request(payload_with_params)
             if len(json_res['graphQueryResult'][0]['instances']) > 0:
                 adm_org_list = []
                 self._recursive_get_adm_org_units(json_res['graphQueryResult'][0]['instances'], adm_org_list)
@@ -202,10 +187,9 @@ class DeltaClient:
 
     # returns a dictionaries with the admin organization unit UUID as the key and a list of sub admin organization unit UUIDs as the value
     def get_adm_org_list(self):
-        if TEST and not self.adm_org_list:
+        if TEST and not self.adm_org_list and os.path.exists(os.path.join(os.path.join(self.assets_path, 'data'), 'adm_org_list.json')):
             logger.info('Test update')
-            data_path = os.path.join(self.assets_path, 'data')
-            with open(os.path.join(data_path, 'adm_org_list.json'), 'r') as json_file:
+            with open(os.path.join(os.path.join(self.assets_path, 'data'), 'adm_org_list.json'), 'r') as json_file:
                 self.adm_org_list = json.load(json_file)
                 self.last_adm_org_list_updated = datetime.now()
         elif not self.adm_org_list:
@@ -220,9 +204,9 @@ class DeltaClient:
                 self._update_adm_org_list_background()
 
         # Write adm_org_list to JSON file - for testing purposes
-        data_path = os.path.join(self.assets_path, 'data')
-        with open(os.path.join(data_path, 'adm_org_list.json'), 'w') as json_file:
-            json.dump(self.adm_org_list, json_file)
+        if TEST:
+            with open(os.path.join(os.path.join(self.assets_path, 'data'), 'adm_org_list.json'), 'w') as json_file:
+                json.dump(self.adm_org_list, json_file)
 
         return self.adm_org_list
 
@@ -246,7 +230,7 @@ class DeltaClient:
             return any([state_change, added_on_date, removed_on_date])
 
         def unpack_employee_details(employee_details_response):
-            query_results = employee_details_response.json().get('graphQueryResult', [])
+            query_results = employee_details_response.get('graphQueryResult', [])
             instances = query_results[0].get('instances', []) if query_results else []
             if instances:
                 uuid, state = instances[0].get('identity', {}).get('uuid', None), instances[0].get('state', None)
@@ -306,10 +290,12 @@ class DeltaClient:
             payload_employee_changes_with_params = self._set_params(payload_employee_changes, {'validFrom':  date.strftime("%Y-%m-%d"), "objType": "APOS-Types-Engagement"})
             if not payload_employee_changes_with_params:
                 raise Exception('Error setting params for employee changes.')
-
+            
+            print(f'Getting employee changes for date: {date.strftime("%Y-%m-%d")}')
             res_employee_changes = self._make_post_request(payload_employee_changes_with_params)
             if res_employee_changes:
-                query_results = res_employee_changes.json().get('queryResultList', [])
+                print('Got employee changes')
+                query_results = res_employee_changes.get('queryResultList', [])
                 registrations = query_results[0].get('registrationList', []) if query_results else []
                 # filter out employee changes which are valid on a later date than 'date'
                 all_employee_changes = [reg for reg in registrations if reg.get('validityDate', None) == date.strftime("%Y-%m-%d")]
@@ -320,12 +306,13 @@ class DeltaClient:
             # Get employee details
             employee_orgs_dict = defaultdict(list)
             employee_detail_dict = defaultdict(dict)
+            print(f'Getting details for {len(employees_with_relevant_changes)} employees with relevant changes')
             for employee_uuid in employees_with_relevant_changes:
                 employee_details_payload = self._get_payload('employee_details')
                 if not employee_details_payload:
                     raise Exception('Error getting payload for employee details.')
 
-                employee_details_payload_with_params = self._set_params(employee_details_payload, {'uuid': employee_uuid})
+                employee_details_payload_with_params = self._set_params(employee_details_payload, {'uuid': employee_uuid, 'validDate': date.strftime("%Y-%m-%d")})
                 if not employee_details_payload_with_params:
                     raise Exception('Error setting params for employee details.')
 
@@ -342,6 +329,7 @@ class DeltaClient:
                                     for aa_org in employee_details['aa_orgs_add']:
                                         if aa_org in adm_org_units_with_employees.keys():
                                             orgs = orgs + [aa_org] + adm_org_units_with_employees[aa_org]
+                                    employee_details['set_job_title'] = True
                                 # External substitutes (eksterne vikarer) has no additional associations but job functions and an organization (administrativ enhed)
                                 elif employee_details['org'] in adm_org_units_with_employees.keys():
                                     orgs = orgs + [employee_details['org']] + adm_org_units_with_employees[employee_details['org']]
@@ -361,7 +349,7 @@ class DeltaClient:
                                 employee_orgs_dict[employee_details['uuid']].extend(orgs)
                                 employee_detail_dict[employee_details['uuid']].update(employee_details)
                         else:
-                            pass  # do nothing with inactive users - Nexus/FK Org should handle this
+                            pass  # do nothing with inactive users - Nexus/FK Org should handle this - TODO: remove this
                             # Filter if connected to Nexus
                             # if any([any([job in job_functions_to_import for job in employee_details['jobs_remove']]),
                             #         any([org in adm_org_units_with_employees.keys() for org in employee_details['aa_orgs_remove']]),
@@ -381,5 +369,80 @@ class DeltaClient:
             return employees_to_change
 
         except Exception as e:
-            logger.error(f'Error getting employee changes: {e}')
+            import traceback
+            tb = traceback.extract_tb(e.__traceback__)
+            if tb:
+                line_number = tb[-1].lineno
+                logger.error(f'Error getting employee changes at line {line_number}: {e}')
+                print(f"Error occurred at line {line_number}")
+            else:
+                logger.error(f'Error getting employee changes: {e}')
             return
+
+    def get_employees(self, date=datetime.today()):
+        adm_org_units_with_employees = self.get_adm_org_list()
+        if not adm_org_units_with_employees:
+            raise Exception('Error getting adm. org. units with employees.')
+
+        payload_all_employments = self._get_payload('all_employments')
+        if not payload_all_employments:
+            raise Exception('Error getting payload for all employments.')
+        
+        payload_all_employments_with_params = self._set_params(payload_all_employments, {'validDate': date.strftime("%Y-%m-%d")})
+
+        res_all_employments = self._make_post_request(payload_all_employments_with_params)
+
+        query_results = res_all_employments.get('graphQueryResult', [])
+        if not query_results:
+            logger.error('No query results found in all employments response.')
+            raise Exception('No query results found in all employments response.')
+
+        all_employments = query_results[0].get('instances', [])
+
+        print(len(all_employments), ' employments found')
+
+        regular_employees_and_external_substitutes = [
+            emp for emp in all_employments
+            if any(
+                tref.get('userKey') == "APOS-Types-Engagement-TypeRelation-AdmUnit" and tref.get('targetObject', {}).get('identity', {}).get('uuid') in adm_org_units_with_employees.keys()
+                for tref in emp.get('typeRefs', [])
+            )
+        ]
+
+        # print(len(regular_employees_and_external_substitutes), 'regular employees and external substitutes found')
+
+        external_substitutes = [
+            emp for emp in regular_employees_and_external_substitutes
+            if any(
+                tref.get('userKey') == "APOS-Types-Engagement-TypeRelation-Jobfunctions"
+                and tref.get('targetObject', {}).get('identity', {}).get('userKey') in job_functions_to_import
+                for tref in emp.get('typeRefs', [])
+            )
+        ]
+
+        print(len(external_substitutes), 'External substitutes found')
+
+        internal_substitutes = [
+            emp for emp in all_employments
+            if any(
+                (
+                    tref.get('userKey') == "APOS-Types-Engagement-TypeRelation-AdditionalAssociation"
+                    and tref.get('targetObject', {}).get('state', {}) == 'STATE_ACTIVE'
+                    and any(
+                        ttref.get('userKey') == "APOS-Types-AdditionalAssociation-TypeRelation-AdmUnit"
+                        and ttref.get('targetObject', {}).get('identity', {}).get('uuid') in adm_org_units_with_employees.keys()
+                        for ttref in tref.get('targetObject', {}).get('typeRefs', [])
+                    )
+                )
+                for tref in emp.get('typeRefs', [])
+            )
+        ]
+
+        print(len(internal_substitutes), 'internal substitutes found')
+
+        regular_employees = [
+            emp for emp in regular_employees_and_external_substitutes
+            if emp not in external_substitutes
+        ]
+
+        print(len(regular_employees), 'regular employees found')

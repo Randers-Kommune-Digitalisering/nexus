@@ -1,18 +1,13 @@
 import re
 import logging
 
-from utils.config import DELTA_CERT_BASE64, DELTA_CERT_PASS, DELTA_BASE_URL, DELTA_TOP_ADM_UNIT_UUID, NEXUS_CLIENT_ID, NEXUS_CLIENT_SECRET, NEXUS_URL
 from delta import DeltaClient
-from nexus.nexus_client import NexusClient, NexusRequest, execute_nexus_flow
+from nexus.nexus_client import nexus_client, NexusRequest, execute_nexus_flow
 
 logger = logging.getLogger(__name__)
-nexus_client = NexusClient(NEXUS_CLIENT_ID, NEXUS_CLIENT_SECRET, NEXUS_URL)
-delta_client = DeltaClient(cert_base64=DELTA_CERT_BASE64, cert_pass=DELTA_CERT_PASS, base_url=DELTA_BASE_URL, top_adm_org_uuid=DELTA_TOP_ADM_UNIT_UUID)
+delta_client = DeltaClient()
 
-
-# TODO: Add "stillingsbetegnelse" for external substitutes (eksterne vikarer)
 # TODO: Handle the different users types (intern vikar, fastansat, ekstern vikar)
-# TODO: Change all the dq-numbers / username to CPR or get someone to fix username in Delta/fk org for external substitutes (eksterne vikarer)
 
 
 def job():
@@ -21,18 +16,6 @@ def job():
         active_org_list = _fetch_all_active_organisations(all_delta_orgs)
         all_job_title_list = _fetch_all_job_titles()
 
-        # from datetime import datetime
-        # employees_changed_list = delta_client.get_employees_changed(date=datetime(2025, 2, 3))
-        # print(employees_changed_list)
-        employees_changed_list = delta_client.get_employees_changed()
-        for e in employees_changed_list:
-            ansat = {'navn': e['name']}
-            if e.get('job_title', None):
-                ansat['stillingsbetegnelse'] = e['job_title']
-            krydser = [item for item in e['organizations']]
-
-        return True
-
         employees_changed_list = delta_client.get_employees_changed()
 
         if employees_changed_list:
@@ -40,12 +23,10 @@ def job():
             _sync_orgs_and_users()
             for index, employee in enumerate(employees_changed_list):
                 logger.info(f"Processing employee {index + 1}/{len(employees_changed_list)}")
-                if employee.get('job_title', None):
-                    # execute_brugerauth(active_org_list, "DQKL008", employee['organizations'], all_delta_orgs, "Sosu-hjælper", all_job_title_list)
+                if employee.get('job_title', False):
                     execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs, employee['job_title'], all_job_title_list)
                 else:
-                    pass
-                    # execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs)
+                    execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs)
         else:
             logger.info("No employees changed")
         return True
@@ -57,22 +38,20 @@ def job():
 def execute_brugerauth(active_org_list: list, primary_identifier: str, input_organisation_uuid_list: list, all_organisation_uuid_list: list = None, job_title: str = None, all_job_title_list: list = None):
     professional = _fetch_professional(primary_identifier)
 
-    # TODO: All professionals should already be in Nexus?
-
     if not professional:
-        raise Exception(f"Professional {primary_identifier} not found in Nexus")
-        # logger.info(f"Professional {primary_identifier} not found in Nexus - creating")
-        # new_professional = _fetch_external_professional(primary_identifier)
-        # if new_professional:
-        #     professional = nexus_client.post_request(new_professional['_links']['create']['href'], json=new_professional)
-        #     if professional:
-        #         logger.info(f"Professional {primary_identifier} created")
-        #     else:
-        #         logger.error(f"Failed to create professional {primary_identifier} - skipping")
-        #         return
-        # else:
-        #     logger.error(f"Professional {primary_identifier} not found in external system - skipping")
-        #     return
+        # raise Exception(f"Professional {primary_identifier} not found in Nexus")
+        logger.info(f"Professional {primary_identifier} not found in Nexus - creating")
+        new_professional = _fetch_external_professional(primary_identifier)
+        if new_professional:
+            professional = nexus_client.post_request(new_professional['_links']['create']['href'], json=new_professional)
+            if professional:
+                logger.info(f"Professional {primary_identifier} created")
+            else:
+                logger.error(f"Failed to create professional {primary_identifier} - skipping")
+                return
+        else:
+            logger.error(f"Professional {primary_identifier} not found in external system - skipping")
+            return
 
     # Get all assigned organisations for professional as list of dicts - [0] being id, [1] being uuid
     professional_org_list = _fetch_professional_org_syncIds(professional)
@@ -110,11 +89,9 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
             current = next((item for item in active_org_list if item['syncId'] == input_organisation_uuid_list[0]), None)
             supplier = current.get('supplier')
 
-            # TODO: Only update supplier if user is a substitue (vikar)
-
-            # If it has a supplier update it
+            # If a supplier for organisation exists update it
             if supplier:
-                if _update_professional_supplier(professional, supplier):  # TODO: Remove, primary_identifier):
+                if _update_professional_supplier(professional, supplier):
                     logger.info(f"Professional {primary_identifier} updated with supplier")
                 else:
                     logger.error(f"Failed to update professional {primary_identifier} with supplier")
@@ -122,7 +99,7 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
                 logger.info(f'Top organisation for professional {primary_identifier} has no supplier - not updating')
 
         if job_title and all_job_title_list:
-            job_title_obj = next((item for item in all_job_title_list if item.get('name') == 'Sosu-hjælper' and item.get('active')), None)
+            job_title_obj = next((item for item in all_job_title_list if item.get('name', '').lower() == job_title.lower() and item.get('active')), None)
             if job_title_obj:
                 if _update_professional_job_title(professional, job_title_obj):
                     logger.info(f"Professional {primary_identifier} updated with job title")
@@ -183,7 +160,7 @@ def _update_professional_organisations(professional, organisation_ids_to_add, or
     return professional_org_change_list
 
 
-def _update_professional_supplier(professional, supplier):  # TODO: Remove, primary_identifier):
+def _update_professional_supplier(professional, supplier):
     # Professional self
     request = NexusRequest(input_response=professional, link_href="self", method="GET")
     professional_self = execute_nexus_flow([request])
