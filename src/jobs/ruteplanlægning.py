@@ -12,7 +12,7 @@ def job():
     try:
         logger.info("Starting ruteplanlægning job")
         orders = get_orders()
-
+        
         # Orders is a list of dictionaries
         # An order has the key 'deliveryAddress' which is in the form below:
         # {
@@ -21,6 +21,10 @@ def job():
         #     "zipCode": "8930",
         #     "city": "Randers NØ"
         # }
+
+        print(orders)  # TODO: Make 3 (?) groups of orders based on delivery address and arrange them in a route / a good order
+
+        # TODO: Insert the orders into the correct lists in Nexus 
 
     except Exception as e:
         logger.error(f"Error in job: {e}")
