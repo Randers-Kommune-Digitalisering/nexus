@@ -50,6 +50,10 @@ def job():
 
             if not all(k in order for k in ['deliveryNote', 'requestedDeliveryDate', 'phones']):
                 logger.warning(f"Order {order.get('uid', 'unknown id')} is missing required fields. Skipping.")
+                if 'deliveryNote' not in order:
+                    delivery_note = order.get('deliveryNote', ' ')
+                    delivery_date = order.get('requestedDeliveryDate', None)
+                    nexus_client.put_request(order['_links']['update']['href'], json={"phones": order['phones'], "requestedDeliveryDate": delivery_date, "deliveryNote": delivery_note})
                 continue
 
             delivery_note = order.get('deliveryNote', '')
