@@ -42,6 +42,11 @@ def job():
     try:
         logger.info("Starting SMS service job")
         home = nexus_client.home_resource()
+
+        if not home:
+            logger.error("Nexus failed")
+            return False
+
         orders = get_orders(home)
 
         for item in orders:
