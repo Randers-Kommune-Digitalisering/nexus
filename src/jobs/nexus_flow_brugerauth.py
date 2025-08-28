@@ -40,17 +40,10 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
 
     if not professional:
         # raise Exception(f"Professional {primary_identifier} not found in Nexus")
-        logger.info(f"Professional {primary_identifier} not found in Nexus - creating")
-        new_professional = _fetch_external_professional(primary_identifier)
-        if new_professional:
-            professional = nexus_client.post_request(new_professional['_links']['create']['href'], json=new_professional)
-            if professional:
-                logger.info(f"Professional {primary_identifier} created")
-            else:
-                logger.error(f"Failed to create professional {primary_identifier} - skipping")
-                return
-        else:
-            logger.error(f"Professional {primary_identifier} not found in external system - skipping")
+        logger.info(f"Professional {primary_identifier} not found in Nexus - importing")
+        professional = _fetch_external_professional(primary_identifier)
+        if not professional:
+            logger.error(f"Failed to import professional {primary_identifier} - skipping")
             return
 
     # Get all assigned organisations for professional as list of dicts - [0] being id, [1] being uuid
@@ -124,16 +117,48 @@ def _fetch_external_professional(primary_identifier):
     if res:
         if 'reason' in res:
             if res['reason'] == 'ProfessionalWithStsSnNotFetched':
+                logger.error(f"Professional {primary_identifier} not found in external system")
                 return None
+            elif res['reason'] == 'ProfessionalWithSameCprAlreadyExists':
+                updated_professional = _update_existing_external_professional(res["brokenObject"], primary_identifier)
+                return updated_professional
             else:
                 raise Exception(f"Error fetching external professional: {res}")
         else:
             res['primaryIdentifier'] = primary_identifier
             res['primaryAddress']['route'] = 'home:importProfessionalFromSts'
             res['activeDirectoryConfiguration']['route'] = 'home:importProfessionalFromSts'
-            return res
+            new_professional = nexus_client.post_request(res['_links']['create']['href'], json=res)
+            if new_professional:
+                logger.info(f"Professional {primary_identifier} created")
+                return new_professional
+            else:
+                logger.error(f"Failed to create professional {primary_identifier} - skipping")
+                return
     else:
         logger.error(f"Error fetching external professional: {res}")
+
+
+def _update_existing_external_professional(broken_object, primary_identifier):
+    try:
+        # Import professional from external system again (updates it as active)
+        res = nexus_client.put_request(path='api/core/mobile/randers/v2/professionals/stsProfessional/stsLinkUpdates', json={"type": "cpr", "identifier": broken_object['details']['cpr']})
+        # Find the old object for the professional
+        professinal_objs = nexus_client.find_professional_by_query(res['primaryIdentifier'])
+        if len(professinal_objs) == 1:
+            # Update the professional with the new username/dq-number (primary identifier)
+            old_professinal = professinal_objs[0]
+            professinal_conf = nexus_client.get_request(old_professinal['_links']['configuration']['href'])
+            if professinal_conf:
+                professinal_conf['primaryIdentifier'] = primary_identifier
+                res = nexus_client.put_request(old_professinal['_links']['configuration']['href'], json=professinal_conf)
+                if res:
+                    return _fetch_professional(primary_identifier)
+            raise Exception('Failed to update existing external professional')
+        else:
+            logger.error('Multiple results returned for old primary identifier')
+    except Exception as e:
+        logger.error(f"Error updating existing external professional: {e}")
 
 
 def _update_professional_organisations(professional, organisation_ids_to_add, organisation_ids_to_remove):

@@ -118,7 +118,8 @@ class NexusClient:
         if home:
             {'query': query}
             professionals_link = home['_links']['importProfessionalFromSts']['href']
-            return self.get_request(professionals_link, params={'query': query})
+            res = self.get_request(professionals_link, params={'query': query})
+            return res
 
     def find_patient_by_query(self, query):
         home = self.home_resource()
@@ -247,7 +248,7 @@ class NexusRequest:
         # Parse the key from the constructor's input response using link_full
         elif self.input_response and self.link_full:
             final_url = self._get_nested_value(self.input_response, self.link_full)
-            print("Extracted URL from link_full:", final_url)
+            logger.info("Extracted URL from link_full:", final_url)
 
         # Parse the key from the formal parameter input response using link_href
         elif input_response and '_links' in input_response and self.link_href in input_response['_links']:
@@ -256,7 +257,7 @@ class NexusRequest:
         # Parse the key from the formal parameter input response using link_full
         elif input_response and self.link_full:
             final_url = self._get_nested_value(input_response, self.link_full)
-            print("Extracted URL from link_full:", final_url)
+            logger.info("Extracted URL from link_full:", final_url)
 
         if not final_url:
             raise ValueError(f"Link '{self.link_href}' not found in the response")

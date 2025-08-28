@@ -217,6 +217,8 @@ class DeltaClient(APIClient):
     # Returns a list of dictionaries with key 'user' containing DQ-number and key 'organizations' containing a list of UUIDs for organizations they need access to
     # TODO: Add more information to the return value - type of employee (intern / ekstern vikar, fastansat) or if they should have their supplier (standard leverandør) set and if they should their position (stillingsbetegnelse) set
     def get_employees_changed(self, date=datetime.today()):
+        logger.info(f'Getting employees changed on {date.strftime("%Y-%m-%d")}')
+
         # Helper functions
         def relevant_time_or_type_of_change(employee_delta_dict, date):
             changes_to_look_for = ['APOS-Types-Engagement-TypeRelation-AdmUnit',  # AdmUnit (arbejdsplads)
@@ -291,10 +293,8 @@ class DeltaClient(APIClient):
             if not payload_employee_changes_with_params:
                 raise Exception('Error setting params for employee changes.')
 
-            print(f'Getting employee changes for date: {date.strftime("%Y-%m-%d")}')
             res_employee_changes = self._make_post_request(payload_employee_changes_with_params)
             if res_employee_changes:
-                print('Got employee changes')
                 query_results = res_employee_changes.get('queryResultList', [])
                 registrations = query_results[0].get('registrationList', []) if query_results else []
                 # filter out employee changes which are valid on a later date than 'date'
@@ -306,7 +306,6 @@ class DeltaClient(APIClient):
             # Get employee details
             employee_orgs_dict = defaultdict(list)
             employee_detail_dict = defaultdict(dict)
-            print(f'Getting details for {len(employees_with_relevant_changes)} employees with relevant changes')
             for employee_uuid in employees_with_relevant_changes:
                 employee_details_payload = self._get_payload('employee_details')
                 if not employee_details_payload:
@@ -374,7 +373,6 @@ class DeltaClient(APIClient):
             if tb:
                 line_number = tb[-1].lineno
                 logger.error(f'Error getting employee changes at line {line_number}: {e}')
-                print(f"Error occurred at line {line_number}")
             else:
                 logger.error(f'Error getting employee changes: {e}')
             return

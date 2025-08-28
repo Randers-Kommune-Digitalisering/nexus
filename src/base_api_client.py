@@ -24,7 +24,8 @@ class BaseAPIClient(ABC):
 
         try:
             response = method(url, headers=headers, **kwargs)
-            response.raise_for_status()
+            if response.status_code != 409:
+                response.raise_for_status()
 
             try:
                 return response.json()
