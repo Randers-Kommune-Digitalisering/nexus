@@ -10,29 +10,37 @@ delta_client = DeltaClient()
 # TODO: Handle the different users types (intern vikar, fastansat, ekstern vikar)
 
 
+from datetime import date, timedelta
+
+
 def job():
-    try:
-        all_delta_orgs = delta_client.get_all_organizations()
-        active_org_list = _fetch_all_active_organisations(all_delta_orgs)
-        all_job_title_list = _fetch_all_job_titles()
 
-        employees_changed_list = delta_client.get_employees_changed()
+    # TODO: Remove - just for testing
+    today = date.today()
+    dates = [today - timedelta(days=i) for i in range(3)]
+    for date in dates:
+        try:
+            all_delta_orgs = delta_client.get_all_organizations()
+            active_org_list = _fetch_all_active_organisations(all_delta_orgs)
+            all_job_title_list = _fetch_all_job_titles()
 
-        if employees_changed_list:
-            logger.info("Employees changed - updating Nexus from external system")
-            _sync_orgs_and_users()
-            for index, employee in enumerate(employees_changed_list):
-                logger.info(f"Processing employee {index + 1}/{len(employees_changed_list)}")
-                if employee.get('job_title', False):
-                    execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs, employee['job_title'], all_job_title_list)
-                else:
-                    execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs)
-        else:
-            logger.info("No employees changed")
+            employees_changed_list = delta_client.get_employees_changed(date)
+
+            if employees_changed_list:
+                logger.info("Employees changed - updating Nexus from external system")
+                _sync_orgs_and_users()
+                for index, employee in enumerate(employees_changed_list):
+                    logger.info(f"Processing employee {index + 1}/{len(employees_changed_list)}")
+                    if employee.get('job_title', False):
+                        execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs, employee['job_title'], all_job_title_list)
+                    else:
+                        execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs)
+            else:
+                logger.info("No employees changed")
+        except Exception as e:
+            logger.error(f"Error in job: {e}")
+            return False
         return True
-    except Exception as e:
-        logger.error(f"Error in job: {e}")
-        return False
 
 
 def execute_brugerauth(active_org_list: list, primary_identifier: str, input_organisation_uuid_list: list, all_organisation_uuid_list: list = None, job_title: str = None, all_job_title_list: list = None):

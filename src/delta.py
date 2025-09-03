@@ -216,7 +216,7 @@ class DeltaClient(APIClient):
 
     # Returns a list of dictionaries with key 'user' containing DQ-number and key 'organizations' containing a list of UUIDs for organizations they need access to
     # TODO: Add more information to the return value - type of employee (intern / ekstern vikar, fastansat) or if they should have their supplier (standard leverandør) set and if they should their position (stillingsbetegnelse) set
-    def get_employees_changed(self, date=datetime.today()):
+    def get_employees_changed(self, date):
         logger.info(f'Getting employees changed on {date.strftime("%Y-%m-%d")}')
 
         # Helper functions
