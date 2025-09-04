@@ -1,5 +1,6 @@
 import re
 import logging
+from datetime import date
 
 from delta import DeltaClient
 from nexus.nexus_client import nexus_client, NexusRequest, execute_nexus_flow
@@ -10,32 +11,27 @@ delta_client = DeltaClient()
 # TODO: Handle the different users types (intern vikar, fastansat, ekstern vikar)
 
 
-from datetime import date, timedelta
-
-
 def job():
     try:
-        # TODO: Remove - just for testing
         today = date.today()
-        dates = [today - timedelta(days=i) for i in range(3)]
-        for d in dates:
-            all_delta_orgs = delta_client.get_all_organizations()
-            active_org_list = _fetch_all_active_organisations(all_delta_orgs)
-            all_job_title_list = _fetch_all_job_titles()
+        logger.info(f'Starting bruger auth job for {today}')
+        all_delta_orgs = delta_client.get_all_organizations()
+        active_org_list = _fetch_all_active_organisations(all_delta_orgs)
+        all_job_title_list = _fetch_all_job_titles()
 
-            employees_changed_list = delta_client.get_employees_changed(d)
+        employees_changed_list = delta_client.get_employees_changed(today)
 
-            if employees_changed_list:
-                logger.info("Employees changed - updating Nexus from external system")
-                _sync_orgs_and_users()
-                for index, employee in enumerate(employees_changed_list):
-                    logger.info(f"Processing employee {index + 1}/{len(employees_changed_list)}")
-                    if employee.get('job_title', False):
-                        execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs, employee['job_title'], all_job_title_list)
-                    else:
-                        execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs)
-            else:
-                logger.info("No employees changed")
+        if employees_changed_list:
+            logger.info("Employees changed - updating Nexus from external system")
+            _sync_orgs_and_users()
+            for index, employee in enumerate(employees_changed_list):
+                logger.info(f"Processing employee {index + 1}/{len(employees_changed_list)}")
+                if employee.get('job_title', False):
+                    execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs, employee['job_title'], all_job_title_list)
+                else:
+                    execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs)
+        else:
+            logger.info("No employees changed")
         return True
     except Exception as e:
         logger.error(f"Error in job: {e}")
@@ -119,7 +115,7 @@ def _fetch_professional(primary_identifier):
         return nexus_client.find_professional_by_query(primary_identifier)[0]
 
 
-def _fetch_external_professional(primary_identifier):
+def _fetch_external_professional(primary_identifier, tries=0):
     res = nexus_client.find_external_professional_by_query(primary_identifier)
     if res:
         if 'reason' in res:
@@ -130,7 +126,8 @@ def _fetch_external_professional(primary_identifier):
                 updated_professional = _update_existing_external_professional(res["brokenObject"], primary_identifier)
                 return updated_professional
             else:
-                raise Exception(f"Error fetching external professional: {res}")
+                logger.error(f"Unknown error in external system for professional {primary_identifier}")
+                return None
         else:
             res['primaryIdentifier'] = primary_identifier
             res['primaryAddress']['route'] = 'home:importProfessionalFromSts'
@@ -143,7 +140,11 @@ def _fetch_external_professional(primary_identifier):
                 logger.error(f"Failed to create professional {primary_identifier} - skipping")
                 return
     else:
-        logger.error(f"Error fetching external professional: {res}")
+        tries = tries + 1
+        if tries < 4:
+            _fetch_external_professional(primary_identifier, tries)
+        else:
+            logger.error(f"Error fetching external professional: {res}")
 
 
 def _update_existing_external_professional(broken_object, primary_identifier):

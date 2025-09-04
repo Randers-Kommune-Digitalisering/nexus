@@ -7,7 +7,7 @@ import threading
 # import requests_pkcs12
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import json
 
 from utils.api_requests import APIClient
@@ -216,18 +216,19 @@ class DeltaClient(APIClient):
 
     # Returns a list of dictionaries with key 'user' containing DQ-number and key 'organizations' containing a list of UUIDs for organizations they need access to
     # TODO: Add more information to the return value - type of employee (intern / ekstern vikar, fastansat) or if they should have their supplier (standard leverandør) set and if they should their position (stillingsbetegnelse) set
-    def get_employees_changed(self, date):
-        logger.info(f'Getting employees changed on {date.strftime("%Y-%m-%d")}')
+    def get_employees_changed(self, changes_date=None):
+        changes_date = date.today() if changes_date is None else changes_date
+        logger.info(f'Getting employees changed on {changes_date.strftime("%Y-%m-%d")}')
 
         # Helper functions
-        def relevant_time_or_type_of_change(employee_delta_dict, date):
+        def relevant_time_or_type_of_change(employee_delta_dict, changes_date):
             changes_to_look_for = ['APOS-Types-Engagement-TypeRelation-AdmUnit',  # AdmUnit (arbejdsplads)
                                    'APOS-Types-Engagement-TypeRelation-Position',  # Position (stillingsbetegnelse)
                                    'APOS-Types-Engagement-TypeRelation-AdditionalAssociation',  # AdditionalAssociation (forhold ved intern vikar, der indeholder arbejdsplads)
                                    'APOS-Types-Engagement-TypeRelation-Jobfunctions']  # Jobfunctions (jobfunktion, brugt for vikarer), ekstra stillingsbetegnelse
 
             state_change = True if employee_delta_dict.get('stateBiList', []) else False
-            added_on_date = [obj for obj in employee_delta_dict.get('typeRefBiList', []) if obj.get('validityInterval', {}).get('from', '') == date.strftime("%Y-%m-%d") and obj.get('value', {}).get('userKey') in changes_to_look_for]
+            added_on_date = [obj for obj in employee_delta_dict.get('typeRefBiList', []) if obj.get('validityInterval', {}).get('from', '') == changes_date.strftime("%Y-%m-%d") and obj.get('value', {}).get('userKey') in changes_to_look_for]
             removed_on_date = [obj for obj in employee_delta_dict.get('closedTypeRefBiList', []) if obj.get('value', {}).get('userKey') in changes_to_look_for]
             return any([state_change, added_on_date, removed_on_date])
 
@@ -289,7 +290,7 @@ class DeltaClient(APIClient):
             if not payload_employee_changes:
                 raise Exception('Error getting payload for employee changes.')
 
-            payload_employee_changes_with_params = self._set_params(payload_employee_changes, {'validFrom': date.strftime("%Y-%m-%d"), "objType": "APOS-Types-Engagement"})
+            payload_employee_changes_with_params = self._set_params(payload_employee_changes, {'validFrom': changes_date.strftime("%Y-%m-%d"), "objType": "APOS-Types-Engagement"})
             if not payload_employee_changes_with_params:
                 raise Exception('Error setting params for employee changes.')
 
@@ -298,8 +299,8 @@ class DeltaClient(APIClient):
                 query_results = res_employee_changes.get('queryResultList', [])
                 registrations = query_results[0].get('registrationList', []) if query_results else []
                 # filter out employee changes which are valid on a later date than 'date'
-                all_employee_changes = [reg for reg in registrations if reg.get('validityDate', None) == date.strftime("%Y-%m-%d")]
-                employees_with_relevant_changes = [change['objectUuid'] for change in all_employee_changes if relevant_time_or_type_of_change(change, date)]
+                all_employee_changes = [reg for reg in registrations if reg.get('validityDate', None) == changes_date.strftime("%Y-%m-%d")]
+                employees_with_relevant_changes = [change['objectUuid'] for change in all_employee_changes if relevant_time_or_type_of_change(change, changes_date)]
             else:
                 raise Exception('Error getting employee changes.')
 
@@ -311,7 +312,7 @@ class DeltaClient(APIClient):
                 if not employee_details_payload:
                     raise Exception('Error getting payload for employee details.')
 
-                employee_details_payload_with_params = self._set_params(employee_details_payload, {'uuid': employee_uuid, 'validDate': date.strftime("%Y-%m-%d")})
+                employee_details_payload_with_params = self._set_params(employee_details_payload, {'uuid': employee_uuid, 'validDate': changes_date.strftime("%Y-%m-%d")})
                 if not employee_details_payload_with_params:
                     raise Exception('Error setting params for employee details.')
 

@@ -130,7 +130,7 @@ class APIClient:
             response = method(url, **kwargs)
             response.raise_for_status()
 
-            self.logger.info(f'{method_string} request to {url} successful')
+            # self.logger.info(f'{method_string} request to {url} successful')
 
             if 'application/json' in response.headers.get('Content-Type', ''):
                 return response.json()
