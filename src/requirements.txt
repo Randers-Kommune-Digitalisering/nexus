@@ -3,6 +3,7 @@ Flask==3.0.3
 paramiko==3.4.0
 py-healthcheck
 pysftp
+pytz
 prometheus-client
 python-dotenv
 requests==2.31.0

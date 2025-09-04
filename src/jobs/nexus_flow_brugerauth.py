@@ -1,6 +1,7 @@
 import re
+import pytz
 import logging
-from datetime import date
+from datetime import datetime
 
 from delta import DeltaClient
 from nexus.nexus_client import nexus_client, NexusRequest, execute_nexus_flow
@@ -13,7 +14,8 @@ delta_client = DeltaClient()
 
 def job():
     try:
-        today = date.today()
+        now = datetime.now(pytz.timezone("Europe/Copenhagen"))
+        today = now.date()
         logger.info(f'Starting bruger auth job for {today}')
         all_delta_orgs = delta_client.get_all_organizations()
         active_org_list = _fetch_all_active_organisations(all_delta_orgs)
@@ -22,8 +24,8 @@ def job():
         employees_changed_list = delta_client.get_employees_changed(today)
 
         if employees_changed_list:
-            logger.info("Employees changed - updating Nexus from external system")
-            _sync_orgs_and_users()
+            # logger.info("Employees changed - updating Nexus from external system")
+            # _sync_orgs_and_users()
             for index, employee in enumerate(employees_changed_list):
                 logger.info(f"Processing employee {index + 1}/{len(employees_changed_list)}")
                 if employee.get('job_title', False):
@@ -44,8 +46,10 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
     if not professional:
         # raise Exception(f"Professional {primary_identifier} not found in Nexus")
         logger.info(f"Professional {primary_identifier} not found in Nexus - importing")
-        professional = _fetch_external_professional(primary_identifier)
-        if not professional:
+        external_professional = _fetch_external_professional(primary_identifier)
+        if external_professional:
+            professional = external_professional
+        else:
             logger.error(f"Failed to import professional {primary_identifier} - skipping")
             return
 
@@ -87,8 +91,9 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
 
             # If a supplier for organisation exists update it
             if supplier:
-                if _update_professional_supplier(professional, supplier):
-                    logger.info(f"Professional {primary_identifier} updated with supplier")
+                if _update_professional_supplier(professional, supplier, primary_identifier):
+                    pass
+                    # logger.info(f"Professional {primary_identifier} updated with supplier")
                 else:
                     logger.error(f"Failed to update professional {primary_identifier} with supplier")
             else:
@@ -97,16 +102,17 @@ def execute_brugerauth(active_org_list: list, primary_identifier: str, input_org
         if job_title and all_job_title_list:
             job_title_obj = next((item for item in all_job_title_list if item.get('name', '').lower() == job_title.lower() and item.get('active')), None)
             if job_title_obj:
-                if _update_professional_job_title(professional, job_title_obj):
-                    logger.info(f"Professional {primary_identifier} updated with job title")
+                if _update_professional_job_title(professional, job_title_obj, primary_identifier):
+                    pass
+                    # logger.info(f"Professional {primary_identifier} updated with job title")
                 else:
                     logger.error(f"Failed to update professional {primary_identifier} with job title")
             else:
                 logger.warning(f"Job title '{job_title}' not found in Nexus - not updating")
 
-        logger.info(f'Professional {primary_identifier} updated sucessfully')
+        logger.info(f'Professional {primary_identifier} processed sucessfully')
     except Exception as e:
-        logger.error(f'Failed to update professional {primary_identifier}: {e}')
+        logger.error(f'Failed to process professional {primary_identifier}: {e}')
 
 
 def _fetch_professional(primary_identifier):
@@ -121,13 +127,14 @@ def _fetch_external_professional(primary_identifier, tries=0):
         if 'reason' in res:
             if res['reason'] == 'ProfessionalWithStsSnNotFetched':
                 logger.error(f"Professional {primary_identifier} not found in external system")
-                return None
             elif res['reason'] == 'ProfessionalWithSameCprAlreadyExists':
                 updated_professional = _update_existing_external_professional(res["brokenObject"], primary_identifier)
-                return updated_professional
+                if updated_professional:
+                    return updated_professional
+                else:
+                    logger.error(f"Failed to update professional {primary_identifier} from external system")
             else:
                 logger.error(f"Unknown error in external system for professional {primary_identifier}")
-                return None
         else:
             res['primaryIdentifier'] = primary_identifier
             res['primaryAddress']['route'] = 'home:importProfessionalFromSts'
@@ -137,34 +144,49 @@ def _fetch_external_professional(primary_identifier, tries=0):
                 logger.info(f"Professional {primary_identifier} created")
                 return new_professional
             else:
-                logger.error(f"Failed to create professional {primary_identifier} - skipping")
+                logger.error(f"Failed to import professional {primary_identifier} from external system")
                 return
     else:
         tries = tries + 1
         if tries < 4:
-            _fetch_external_professional(primary_identifier, tries)
+            logger.info('Retrying...')
+            return _fetch_external_professional(primary_identifier, tries)
         else:
             logger.error(f"Error fetching external professional: {res}")
 
 
-def _update_existing_external_professional(broken_object, primary_identifier):
+def _update_existing_external_professional(broken_object, primary_identifier, tries=0):
     try:
         # Import professional from external system again (updates it as active)
         res = nexus_client.put_request(path='api/core/mobile/randers/v2/professionals/stsProfessional/stsLinkUpdates', json={"type": "cpr", "identifier": broken_object['details']['cpr']})
-        # Find the old object for the professional
-        professinal_objs = nexus_client.find_professional_by_query(res['primaryIdentifier'])
-        if len(professinal_objs) == 1:
-            # Update the professional with the new username/dq-number (primary identifier)
-            old_professinal = professinal_objs[0]
-            professinal_conf = nexus_client.get_request(old_professinal['_links']['configuration']['href'])
-            if professinal_conf:
-                professinal_conf['primaryIdentifier'] = primary_identifier
-                res = nexus_client.put_request(old_professinal['_links']['configuration']['href'], json=professinal_conf)
-                if res:
-                    return _fetch_professional(primary_identifier)
-            raise Exception('Failed to update existing external professional')
+        if res:
+            # Find the old object for the professional
+            professinal_objs = nexus_client.find_professional_by_query(res['primaryIdentifier'])
+            if len(professinal_objs) == 1:
+                # Update the professional with the new username/dq-number (primary identifier)
+                old_professinal = professinal_objs[0]
+                professinal_conf = nexus_client.get_request(old_professinal['_links']['configuration']['href'])
+                if professinal_conf:
+                    professinal_conf['primaryIdentifier'] = primary_identifier
+                    update_res = nexus_client.put_request(old_professinal['_links']['configuration']['href'], json=professinal_conf)
+                    if update_res:
+                        logger.info(f'Updated username (DQ-number / unique ID) of professional {primary_identifier}')
+                        professinal = _fetch_professional(primary_identifier)
+                        if professinal:
+                            return professinal
+                        else:
+                            logger.error(f'Unable to get professional {primary_identifier} after update')
+                    else:
+                        logger.error(f'Failed to update existing external professional {primary_identifier}')
+            else:
+                logger.error('Multiple results returned for old primary identifier')
         else:
-            logger.error('Multiple results returned for old primary identifier')
+            tries = tries + 1
+            if tries < 4:
+                logger.info('Retrying...')
+                return _update_existing_external_professional(broken_object, primary_identifier, tries)
+            else:
+                logger.error(f"Failed to import professional {primary_identifier}")
     except Exception as e:
         logger.error(f"Error updating existing external professional: {e}")
 
@@ -193,7 +215,7 @@ def _update_professional_organisations(professional, organisation_ids_to_add, or
     return professional_org_change_list
 
 
-def _update_professional_supplier(professional, supplier):
+def _update_professional_supplier(professional, supplier, primary_identifier):
     # Professional self
     request = NexusRequest(input_response=professional, link_href="self", method="GET")
     professional_self = execute_nexus_flow([request])
@@ -202,12 +224,18 @@ def _update_professional_supplier(professional, supplier):
     request = NexusRequest(input_response=professional_self, link_href="configuration", method="GET")
     professional_config = execute_nexus_flow([request])
 
-    professional_config['defaultOrganizationSupplier'] = supplier
-    request = NexusRequest(input_response=professional_config, link_href='update', method='PUT', payload=professional_config)
-    return execute_nexus_flow([request])
+    if professional_config['defaultOrganizationSupplier'] == supplier:
+        logger.info(f'Professional {primary_identifier} already has correct supplier assigned - not updating')
+        return True
+    else:
+        professional_config['defaultOrganizationSupplier'] = supplier
+        request = NexusRequest(input_response=professional_config, link_href='update', method='PUT', payload=professional_config)
+        if execute_nexus_flow([request]):
+            logger.info(f"Professional {primary_identifier} updated with supplier")
+            return True
 
 
-def _update_professional_job_title(professional, job_title):
+def _update_professional_job_title(professional, job_title, primary_identifier):
     # Professional self
     request = NexusRequest(input_response=professional, link_href="self", method="GET")
     professional_self = execute_nexus_flow([request])
@@ -216,9 +244,15 @@ def _update_professional_job_title(professional, job_title):
     request = NexusRequest(input_response=professional_self, link_href="configuration", method="GET")
     professional_config = execute_nexus_flow([request])
 
-    professional_config['professionalJob'] = job_title
-    request = NexusRequest(input_response=professional_config, link_href='update', method='PUT', payload=professional_config)
-    return execute_nexus_flow([request])
+    if professional_config['professionalJob'] == job_title:
+        logger.info(f'Professional {primary_identifier} already has correct job title assigned - not updating')
+        return True
+    else:
+        professional_config['professionalJob'] = job_title
+        request = NexusRequest(input_response=professional_config, link_href='update', method='PUT', payload=professional_config)
+        if execute_nexus_flow([request]):
+            logger.info(f"Professional {primary_identifier} updated with job title")
+            return True
 
 
 def _fetch_professional_org_syncIds(professional):
