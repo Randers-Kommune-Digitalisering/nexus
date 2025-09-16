@@ -136,16 +136,11 @@ def _fetch_external_professional(primary_identifier, tries=0):
             else:
                 logger.error(f"Unknown error in external system for professional {primary_identifier}")
         else:
-            res['primaryIdentifier'] = primary_identifier
-            res['primaryAddress']['route'] = 'home:importProfessionalFromSts'
-            res['activeDirectoryConfiguration']['route'] = 'home:importProfessionalFromSts'
-            new_professional = nexus_client.post_request(res['_links']['create']['href'], json=res)
+            new_professional = _create_external_professional(res, primary_identifier)
             if new_professional:
-                logger.info(f"Professional {primary_identifier} created")
                 return new_professional
             else:
-                logger.error(f"Failed to import professional {primary_identifier} from external system")
-                return
+                logger.error(f"Failed to create professional {primary_identifier} from external system")
     else:
         tries = tries + 1
         if tries < 4:
@@ -153,6 +148,21 @@ def _fetch_external_professional(primary_identifier, tries=0):
             return _fetch_external_professional(primary_identifier, tries)
         else:
             logger.error(f"Error fetching external professional: {res}")
+
+
+def _create_external_professional(external_professional, primary_identifier, tries=0):
+    external_professional['primaryIdentifier'] = primary_identifier
+    external_professional['primaryAddress']['route'] = 'home:importProfessionalFromSts'
+    external_professional['activeDirectoryConfiguration']['route'] = 'home:importProfessionalFromSts'
+    new_professional = nexus_client.post_request(external_professional['_links']['create']['href'], json=external_professional)
+    if new_professional:
+        logger.info(f"Professional {primary_identifier} created")
+        return new_professional
+    else:
+        tries = tries + 1
+        if tries < 4:
+            logger.info('Retrying...')
+            return _create_external_professional(external_professional, primary_identifier, tries)
 
 
 def _update_existing_external_professional(broken_object, primary_identifier, tries=0):
