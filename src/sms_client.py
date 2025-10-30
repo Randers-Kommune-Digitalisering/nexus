@@ -26,11 +26,11 @@ def send_sms(phone_number, text_message):
         try:
             xml_payload = xml_template.format(phone_number=cleaned_phone_number, message=text_message)
 
-            if get_sms_sent(cleaned_phone_number) >= 3:
+            if get_sms_sent(cleaned_phone_number) >= 10:
                 last_sent = get_last_sms_time(cleaned_phone_number)
                 if last_sent and (time.time() - last_sent) < 86400:
                     logger.warning(f"SMS to {cleaned_phone_number} was sent less than a day ago.")
-                    return f"3 SMSer allerede sendt til {cleaned_phone_number} indenfor det sidste døgn."
+                    return f"10 SMSer allerede sendt til {cleaned_phone_number} indenfor det sidste døgn."
 
             response = sms_client.make_request(data=xml_payload.encode('utf-8'), headers={"Content-Type": "application/xml; charset=utf-8"})
 

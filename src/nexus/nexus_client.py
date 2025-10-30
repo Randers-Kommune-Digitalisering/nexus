@@ -74,16 +74,21 @@ class NexusAPIClient(BaseAPIClient):
             self.refresh_token_expiry = time.time() + data.get('refresh_expires_in', 0)
             return self.access_token
         except requests.exceptions.RequestException as e:
-            logger.error(e)
+            logger.warning(f'Failed to refresh access token: {e}')
+            self.access_token = None
+            self.access_token_expiry = None
+            self.refresh_token = None
+            self.refresh_token_expiry = None
             return None
 
     def authenticate(self):
-        if self.access_token and self.access_token_expiry and time.time() < self.access_token_expiry:
-            return self.access_token
-        elif self.refresh_token and self.refresh_token_expiry and time.time() < self.refresh_token_expiry:
-            return self.refresh_access_token()
-        else:
-            return self.request_access_token()
+        if self.access_token and self.access_token_expiry:
+            if time.time() < self.access_token_expiry:
+                return self.access_token
+            elif self.refresh_token and self.refresh_token_expiry:
+                if time.time() < self.refresh_token_expiry:
+                    return self.refresh_access_token()
+        return self.request_access_token()
 
     def get_access_token(self):
         return self.authenticate()
