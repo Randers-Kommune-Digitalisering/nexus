@@ -130,7 +130,10 @@
                         {
                             "userKey": "APOS-Types-User-TypeRelation-Engagement",
                             "projection": {
-                                "identity": true
+                                "identity": true,
+                                "attributes": [
+                                    "APOS-Types-User-Attribute-UserPrincipalName"
+                                ]
                             }
                         }
                     ]

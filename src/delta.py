@@ -240,7 +240,7 @@ class DeltaClient(APIClient):
                 if not state or not uuid:
                     logger.error(f'No state or uuid found for employee: {uuid}')
                     return
-                user, cpr, name, org, postion, jobs_add, jobs_remove, aa_orgs_add, aa_orgs_remove = None, None, None, None, None, [], [], [], []
+                upn, user, cpr, name, org, postion, jobs_add, jobs_remove, aa_orgs_add, aa_orgs_remove = None, None, None, None, None, None, [], [], [], []
                 for type_ref in instances[0].get('typeRefs', []) + instances[0].get('inTypeRefs', []):
                     if type_ref.get('refObjTypeUserKey', '') == 'APOS-Types-AdditionalAssociation':
                         if type_ref.get('targetObject', {}).get('state', '') == 'STATE_ACTIVE':
@@ -269,13 +269,16 @@ class DeltaClient(APIClient):
                             return
                         else:
                             user = type_ref.get('targetObject', {}).get('identity', {}).get('userKey', None)
+                            for att in type_ref.get('targetObject', {}).get('attributes', []):
+                                if att.get('userKey', '') == 'APOS-Types-User-Attribute-UserPrincipalName':
+                                    upn = att.get('value', None)
 
                 if not user:
                     # A lot of employees do not have a user and should be ignored for Nexus changes
                     logger.debug(f'No user found for employee: {uuid}')
                     return
 
-                return {'uuid': uuid, 'state': state, 'user': user, 'cpr': cpr, 'name': name, 'position': postion, 'org': org, 'jobs_add': jobs_add, 'jobs_remove': jobs_remove, 'aa_orgs_add': aa_orgs_add, 'aa_orgs_remove': aa_orgs_remove}
+                return {'uuid': uuid, 'state': state, 'user': user, 'upn': upn, 'cpr': cpr, 'name': name, 'position': postion, 'org': org, 'jobs_add': jobs_add, 'jobs_remove': jobs_remove, 'aa_orgs_add': aa_orgs_add, 'aa_orgs_remove': aa_orgs_remove}
             else:
                 logger.error(f'No instances found in employee details response. Response. {employee_details_response}')
 
@@ -361,10 +364,15 @@ class DeltaClient(APIClient):
             employees_to_change = []
 
             for e in employee_orgs_dict:
-                employee = {'user': employee_detail_dict[e]['user'], 'cpr': employee_detail_dict[e]['cpr'], 'name': employee_detail_dict[e]['name'], 'organizations': employee_orgs_dict[e]}
+                employee = {'upn': employee_detail_dict[e]['upn'], 'user': employee_detail_dict[e]['user'], 'cpr': employee_detail_dict[e]['cpr'], 'name': employee_detail_dict[e]['name'], 'organizations': employee_orgs_dict[e]}
                 if len(employee_detail_dict[e]['jobs_add']) == 1 and employee_detail_dict[e]['set_job_title']:
                     employee['job_title'] = employee_detail_dict[e]['jobs_add'][0]
                 employees_to_change.append(employee)
+
+            # Ensure all employees have both 'user' and 'upn' set to a value
+            for emp in employees_to_change:
+                if not emp.get('user') or not emp.get('upn'):
+                    raise Exception(f"Employee missing 'user' or 'upn': {emp}")
 
             return employees_to_change
 

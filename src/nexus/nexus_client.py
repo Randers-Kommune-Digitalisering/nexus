@@ -92,6 +92,27 @@ class NexusAPIClient(BaseAPIClient):
         token = self.get_access_token()
         return {"Authorization": f"Bearer {token}"}
 
+    def logout(self):
+        logout_url = f"{self.base_url}/{NEXUS_AUTH_TYPE}/realms/{NEXUS_REALM}/protocol/openid-connect/logout"
+        payload = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "refresh_token": self.refresh_token
+        }
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        try:
+            response = requests.get(logout_url, headers=headers, data=payload)
+            response.raise_for_status()
+            self.access_token = None
+            self.access_token_expiry = None
+            self.refresh_token = None
+            self.refresh_token_expiry = None
+            logger.info("Successfully logged out from Nexus")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Logout failed: {e}")
+
 
 # Nexus client
 class NexusClient:

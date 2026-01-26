@@ -9,7 +9,8 @@ from nexus.nexus_client import nexus_client, NexusRequest, execute_nexus_flow
 logger = logging.getLogger(__name__)
 delta_client = DeltaClient()
 
-# TODO: Handle the different users types (intern vikar, fastansat, ekstern vikar)
+# TODO: Handle the different users types (intern vikar, fastansat, ekstern vikar) ? should be handled
+# TODO: Set "Stillingsbetegnelse"(Nexus) from "Stilling Type"(Delta) ? 
 
 
 def job():
@@ -29,24 +30,26 @@ def job():
             for index, employee in enumerate(employees_changed_list):
                 logger.info(f"Processing employee {index + 1}/{len(employees_changed_list)}")
                 if employee.get('job_title', False):
-                    execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs, employee['job_title'], all_job_title_list)
+                    execute_brugerauth(active_org_list, employee['user'], employee['upn'], employee['organizations'], all_delta_orgs, employee['job_title'], all_job_title_list)
                 else:
-                    execute_brugerauth(active_org_list, employee['user'], employee['organizations'], all_delta_orgs)
+                    execute_brugerauth(active_org_list, employee['user'], employee['upn'], employee['organizations'], all_delta_orgs)
         else:
             logger.info("No employees changed")
         return True
     except Exception as e:
         logger.error(f"Error in job: {e}")
         return False
+    finally:
+        nexus_client.api_client.logout()
 
 
-def execute_brugerauth(active_org_list: list, primary_identifier: str, input_organisation_uuid_list: list, all_organisation_uuid_list: list = None, job_title: str = None, all_job_title_list: list = None):
+def execute_brugerauth(active_org_list: list, primary_identifier: str, upn: str, input_organisation_uuid_list: list, all_organisation_uuid_list: list = None, job_title: str = None, all_job_title_list: list = None):
     professional = _fetch_professional(primary_identifier)
 
     if not professional:
         # raise Exception(f"Professional {primary_identifier} not found in Nexus")
         logger.info(f"Professional {primary_identifier} not found in Nexus - importing")
-        external_professional = _fetch_external_professional(primary_identifier)
+        external_professional = _fetch_external_professional(primary_identifier, upn)
         if external_professional:
             professional = external_professional
         else:
@@ -121,14 +124,14 @@ def _fetch_professional(primary_identifier):
         return nexus_client.find_professional_by_query(primary_identifier)[0]
 
 
-def _fetch_external_professional(primary_identifier, tries=0):
+def _fetch_external_professional(primary_identifier, upn, tries=0):
     res = nexus_client.find_external_professional_by_query(primary_identifier)
     if res:
         if 'reason' in res:
             if res['reason'] == 'ProfessionalWithStsSnNotFetched':
                 logger.error(f"Professional {primary_identifier} not found in external system")
             elif res['reason'] == 'ProfessionalWithSameCprAlreadyExists':
-                updated_professional = _update_existing_external_professional(res["brokenObject"], primary_identifier)
+                updated_professional = _update_existing_external_professional(res["brokenObject"], primary_identifier, upn)
                 if updated_professional:
                     return updated_professional
                 else:
@@ -136,7 +139,7 @@ def _fetch_external_professional(primary_identifier, tries=0):
             else:
                 logger.error(f"Unknown error in external system for professional {primary_identifier}")
         else:
-            new_professional = _create_external_professional(res, primary_identifier)
+            new_professional = _create_external_professional(res, primary_identifier, upn)
             if new_professional:
                 return new_professional
             else:
@@ -145,13 +148,15 @@ def _fetch_external_professional(primary_identifier, tries=0):
         tries = tries + 1
         if tries < 4:
             logger.info('Retrying...')
-            return _fetch_external_professional(primary_identifier, tries)
+            return _fetch_external_professional(primary_identifier, upn, tries)
         else:
             logger.error(f"Error fetching external professional: {res}")
 
 
-def _create_external_professional(external_professional, primary_identifier, tries=0):
+def _create_external_professional(external_professional, primary_identifier, upn, tries=0):
     external_professional['primaryIdentifier'] = primary_identifier
+    external_professional['identityId'] = upn
+    external_professional['activeDirectoryConfiguration']['upn'] = upn
     external_professional['primaryAddress']['route'] = 'home:importProfessionalFromSts'
     external_professional['activeDirectoryConfiguration']['route'] = 'home:importProfessionalFromSts'
     new_professional = nexus_client.post_request(external_professional['_links']['create']['href'], json=external_professional)
@@ -162,10 +167,10 @@ def _create_external_professional(external_professional, primary_identifier, tri
         tries = tries + 1
         if tries < 4:
             logger.info('Retrying...')
-            return _create_external_professional(external_professional, primary_identifier, tries)
+            return _create_external_professional(external_professional, primary_identifier, upn, tries)
 
 
-def _update_existing_external_professional(broken_object, primary_identifier, tries=0):
+def _update_existing_external_professional(broken_object, primary_identifier, upn, tries=0):
     try:
         # Import professional from external system again (updates it as active)
         res = nexus_client.put_request(path='api/core/mobile/randers/v2/professionals/stsProfessional/stsLinkUpdates', json={"type": "cpr", "identifier": broken_object['details']['cpr']})
@@ -178,9 +183,11 @@ def _update_existing_external_professional(broken_object, primary_identifier, tr
                 professinal_conf = nexus_client.get_request(old_professinal['_links']['configuration']['href'])
                 if professinal_conf:
                     professinal_conf['primaryIdentifier'] = primary_identifier
+                    professinal_conf['identityId'] = upn
+                    professinal_conf['activeDirectoryConfiguration']['upn'] = upn
                     update_res = nexus_client.put_request(old_professinal['_links']['configuration']['href'], json=professinal_conf)
                     if update_res:
-                        logger.info(f'Updated username (DQ-number / unique ID) of professional {primary_identifier}')
+                        logger.info(f'Updated username (DQ-number/unique ID) and UPN for professional {primary_identifier}')
                         professinal = _fetch_professional(primary_identifier)
                         if professinal:
                             return professinal
@@ -194,7 +201,7 @@ def _update_existing_external_professional(broken_object, primary_identifier, tr
             tries = tries + 1
             if tries < 4:
                 logger.info('Retrying...')
-                return _update_existing_external_professional(broken_object, primary_identifier, tries)
+                return _update_existing_external_professional(broken_object, primary_identifier, upn, tries)
             else:
                 logger.error(f"Failed to import professional {primary_identifier}")
     except Exception as e:
