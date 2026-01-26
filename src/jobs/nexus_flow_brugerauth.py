@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 delta_client = DeltaClient()
 
 # TODO: Handle the different users types (intern vikar, fastansat, ekstern vikar) ? should be handled
-# TODO: Set "Stillingsbetegnelse"(Nexus) from "Stilling Type"(Delta) ? 
+# TODO: Set "Stillingsbetegnelse"(Nexus) from "Stilling Type"(Delta) ?
 
 
 def job():
